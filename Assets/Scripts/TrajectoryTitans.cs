@@ -109,6 +109,7 @@ namespace TrajectoryTitans
         private Vector2 scroll;
         private int campaignStage = 1;
         private float cameraShake;
+        private float cameraShakeIntensity;
         private Vector3 cameraBase;
 
         private readonly WeaponData[] weapons = new WeaponData[]
@@ -186,12 +187,18 @@ namespace TrajectoryTitans
         {
             safe = Screen.safeArea;
             if (messageTimer > 0) messageTimer -= Time.deltaTime;
+
+            // Improved camera shake system
             if (cameraShake > 0)
             {
                 cameraShake -= Time.deltaTime;
-                cam.transform.position = cameraBase + (Vector3)UnityEngine.Random.insideUnitCircle * .13f;
+                float shake = Mathf.Sin(Time.time * 45f) * cameraShakeIntensity * (cameraShake / 0.4f);
+                cam.transform.position = cameraBase + new Vector3(shake * 0.6f, shake * 0.4f, 0);
             }
-            else cam.transform.position = cameraBase;
+            else 
+            {
+                cam.transform.position = cameraBase;
+            }
 
             if (screen != ScreenState.Battle || paused || battleEnded) return;
             UpdateProjectile();
@@ -481,25 +488,74 @@ namespace TrajectoryTitans
 
         private void Explode(ProjectileSim p)
         {
-            cameraShake = .28f;
-            for (int i = 0; i < 14; i++)
+            // === IMPROVED EXPLOSION VISUALS (Stage A) ===
+            float impactRadius = p.weapon.radius;
+            Vector2 impactPos = p.position;
+
+            // Dynamic camera shake based on weapon power
+            cameraShake = 0.38f;
+            cameraShakeIntensity = Mathf.Clamp(impactRadius * 0.9f, 0.8f, 2.8f);
+
+            // Central bright flash
+            var flash = CreateCircle("ExplosionFlash", impactPos, impactRadius * 0.9f, Color.white, 15);
+            flash.GetComponent<SpriteRenderer>().color = new Color(1f, 0.95f, 0.8f, 0.9f);
+            Destroy(flash, 0.12f);
+
+            // Main explosion core
+            for (int i = 0; i < 18; i++)
             {
-                var fx = CreateCircle("Burst", p.position + UnityEngine.Random.insideUnitCircle * p.weapon.radius * .45f, UnityEngine.Random.Range(.05f,.22f), p.weapon.color, 12);
-                Destroy(fx, .35f);
+                float angle = i * 20f;
+                Vector2 offset = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * UnityEngine.Random.Range(0.1f, impactRadius * 0.55f);
+                float size = UnityEngine.Random.Range(0.08f, 0.28f);
+                var core = CreateCircle("ExplosionCore", impactPos + offset, size, p.weapon.color, 12);
+                Destroy(core, UnityEngine.Random.Range(0.25f, 0.45f));
             }
-            DeformTerrain(p.position, p.weapon.radius);
-            DamageTank(player, p.position, p.weapon, p.enemy);
-            DamageTank(enemy, p.position, p.weapon, !p.enemy);
+
+            // Secondary debris / sparks
+            for (int i = 0; i < 12; i++)
+            {
+                Vector2 offset = UnityEngine.Random.insideUnitCircle * impactRadius * 0.7f;
+                float size = UnityEngine.Random.Range(0.04f, 0.12f);
+                var debris = CreateCircle("Debris", impactPos + offset, size, Color.Lerp(p.weapon.color, Color.white, 0.3f), 11);
+                Destroy(debris, UnityEngine.Random.Range(0.15f, 0.35f));
+            }
+
+            // Extra ring effect for heavy weapons
+            if (p.weapon.heavy)
+            {
+                var ring = CreateCircle("Shockwave", impactPos, impactRadius * 1.1f, new Color(1f, 0.6f, 0.2f, 0.6f), 9);
+                Destroy(ring, 0.22f);
+            }
+
+            // Call terrain deformation
+            DeformTerrain(impactPos, impactRadius);
+
+            // Apply damage
+            DamageTank(player, impactPos, p.weapon, p.enemy);
+            DamageTank(enemy, impactPos, p.weapon, !p.enemy);
+
             if (save.vibration && Application.isMobilePlatform) Handheld.Vibrate();
+
             CheckBattleEnd();
+
             if (!battleEnded && projectiles.Count <= 1)
             {
-                if (p.enemy) { playerTurn = true; turnNumber++; wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f); Toast("Your turn"); ShowTrajectory(); }
-                else { turnDelay = 1.25f; }
+                if (p.enemy) 
+                { 
+                    playerTurn = true; 
+                    turnNumber++; 
+                    wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f); 
+                    Toast("Your turn"); 
+                    ShowTrajectory(); 
+                }
+                else 
+                { 
+                    turnDelay = 1.25f; 
+                }
             }
         }
 
-        // NEW: Terrain Deformation - Creates craters on impact
+        // Terrain Deformation
         private void DeformTerrain(Vector2 impact, float radius)
         {
             float deformRadius = radius * 1.6f;
@@ -516,16 +572,13 @@ namespace TrajectoryTitans
                 float dist = Vector2.Distance(new Vector2(go.transform.position.x, go.transform.position.y), impact);
                 if (dist > deformRadius) continue;
 
-                // Calculate how much to lower this block
                 float dropAmount = maxDrop * (1f - Mathf.Clamp01(dist / deformRadius));
                 dropAmount = Mathf.Max(dropAmount, 0.25f);
 
-                // Lower the terrain block to create a crater effect
                 Vector3 pos = go.transform.position;
                 pos.y -= dropAmount;
                 go.transform.position = pos;
 
-                // Make grass disappear in the crater center for better visual
                 if (go.name.StartsWith("Grass") && dist < radius * 0.7f)
                 {
                     Destroy(go);
