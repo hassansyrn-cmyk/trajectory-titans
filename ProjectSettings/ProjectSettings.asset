@@ -22,7 +22,7 @@ PlayerSettings:
   AndroidTargetSdkVersion: 0
   scriptingBackend:
     Android: 1
-  targetArchitectures: 2
+  targetArchitectures: 3
   stripEngineCode: 1
   managedStrippingLevel:
     Android: 1
