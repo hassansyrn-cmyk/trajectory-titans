@@ -405,8 +405,8 @@ namespace TrajectoryTitans
             Rect wp = new Rect(sw * .5f, sh - panelH + 10, sw * .22f, 62);
             Box(wp, new Color(.08f,.11f,.19f,.95f));
             GUI.Label(new Rect(wp.x + 10, wp.y + 4, wp.width - 20, 28), weapons[weaponIndex].name, smallStyle);
-            if (GUI.Button(new Rect(wp.x + 8, wp.y + 33, 45, 25), "<")) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
-            if (GUI.Button(new Rect(wp.x + wp.width - 53, wp.y + 33, 45, 25), ">")) weaponIndex = (weaponIndex + 1) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + 8, wp.y + 33, 45, 25), "<”)) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + wp.width - 53, wp.y + 33, 45, 25), ">”)) weaponIndex = (weaponIndex + 1) % weapons.Length;
             if (BigButton(new Rect(sw * .75f, sh - panelH + 8, sw * .15f, panelH - 25), "FIRE")) PlayerShoot();
         }
 
@@ -487,6 +487,7 @@ namespace TrajectoryTitans
                 var fx = CreateCircle("Burst", p.position + UnityEngine.Random.insideUnitCircle * p.weapon.radius * .45f, UnityEngine.Random.Range(.05f,.22f), p.weapon.color, 12);
                 Destroy(fx, .35f);
             }
+            DeformTerrain(p.position, p.weapon.radius);
             DamageTank(player, p.position, p.weapon, p.enemy);
             DamageTank(enemy, p.position, p.weapon, !p.enemy);
             if (save.vibration && Application.isMobilePlatform) Handheld.Vibrate();
@@ -495,6 +496,41 @@ namespace TrajectoryTitans
             {
                 if (p.enemy) { playerTurn = true; turnNumber++; wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f); Toast("Your turn"); ShowTrajectory(); }
                 else { turnDelay = 1.25f; }
+            }
+        }
+
+        // NEW: Terrain Deformation - Creates craters on impact
+        private void DeformTerrain(Vector2 impact, float radius)
+        {
+            float deformRadius = radius * 1.6f;
+            float maxDrop = Mathf.Clamp(radius * 0.85f, 0.6f, 2.2f);
+
+            for (int i = worldObjects.Count - 1; i >= 0; i--)
+            {
+                var go = worldObjects[i];
+                if (go == null) continue;
+
+                bool isTerrain = go.name.StartsWith("Terrain") || go.name.StartsWith("Grass");
+                if (!isTerrain) continue;
+
+                float dist = Vector2.Distance(new Vector2(go.transform.position.x, go.transform.position.y), impact);
+                if (dist > deformRadius) continue;
+
+                // Calculate how much to lower this block
+                float dropAmount = maxDrop * (1f - Mathf.Clamp01(dist / deformRadius));
+                dropAmount = Mathf.Max(dropAmount, 0.25f);
+
+                // Lower the terrain block to create a crater effect
+                Vector3 pos = go.transform.position;
+                pos.y -= dropAmount;
+                go.transform.position = pos;
+
+                // Make grass disappear in the crater center for better visual
+                if (go.name.StartsWith("Grass") && dist < radius * 0.7f)
+                {
+                    Destroy(go);
+                    worldObjects.RemoveAt(i);
+                }
             }
         }
 
@@ -625,7 +661,7 @@ namespace TrajectoryTitans
             if (!circle && squareSprite != null) return squareSprite;
             if (circle && circleSprite != null) return circleSprite;
             int s = 64; var tex = new Texture2D(s,s,TextureFormat.RGBA32,false); tex.filterMode = FilterMode.Bilinear;
-            for (int y=0;y<s;y++) for(int x=0;x<s;x++)
+            for (int y=0;y=s;y++) for(int x=0;x=s;x++)
             {
                 bool inside = !circle || Vector2.Distance(new Vector2(x,y),new Vector2(31.5f,31.5f)) <= 31.2f;
                 tex.SetPixel(x,y,inside?Color.white:Color.clear);
