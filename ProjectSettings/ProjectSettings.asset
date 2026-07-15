@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: 11111111111111111111111111111111
+  AndroidProfiler: 0
+  companyName: DesertArcade Studio
+  productName: Trajectory Titans
+  defaultScreenWidth: 1920
+  defaultScreenHeight: 1080
+  defaultScreenOrientation: 3
+  targetDevice: 2
+  useOnDemandResources: 0
+  accelerometerFrequency: 60
+  bundleVersion: 0.1.0
+  applicationIdentifier:
+    Android: com.desertarcade.trajectorytitans
+  AndroidBundleVersionCode: 1
+  AndroidMinSdkVersion: 24
+  AndroidTargetSdkVersion: 0
+  scriptingBackend:
+    Android: 1
+  targetArchitectures: 1
+  stripEngineCode: 1
+  managedStrippingLevel:
+    Android: 1
+  activeInputHandler: 0
