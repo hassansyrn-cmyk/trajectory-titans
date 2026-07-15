@@ -112,6 +112,11 @@ namespace TrajectoryTitans
         private float cameraShakeIntensity;
         private Vector3 cameraBase;
 
+        // === NEW: Tank Movement System (Stage B) ===
+        private float playerFuel = 80f;
+        private float maxFuelPerTurn = 80f;
+        private float moveSpeed = 1.8f;
+
         private readonly WeaponData[] weapons = new WeaponData[]
         {
             new WeaponData("Comet Shell", "Reliable blast with balanced damage.", 28, 1.5f, 1, new Color(1f,.72f,.15f)),
@@ -188,7 +193,6 @@ namespace TrajectoryTitans
             safe = Screen.safeArea;
             if (messageTimer > 0) messageTimer -= Time.deltaTime;
 
-            // Improved camera shake system
             if (cameraShake > 0)
             {
                 cameraShake -= Time.deltaTime;
@@ -341,6 +345,7 @@ namespace TrajectoryTitans
             screen = ScreenState.Battle;
             paused = false; battleEnded = false; playerTurn = true; turnNumber = 1;
             weaponIndex = save.selectedWeapon; aimAngle = 42; shotPower = 52;
+            playerFuel = maxFuelPerTurn;
             mapSeed = UnityEngine.Random.Range(1000, 999999); rng = new System.Random(mapSeed);
             wind = UnityEngine.Random.Range(-2.2f, 2.2f);
             CreateWorld();
@@ -402,19 +407,48 @@ namespace TrajectoryTitans
             GUI.Label(new Rect(sw * .415f, 18, sw * .17f, 45), "WIND " + (wind >= 0 ? "→ " : "← ") + Mathf.Abs(wind).ToString("0.0"), centerStyle);
             if (GUI.Button(new Rect(sw - 72, sh - 64, 55, 45), "II", buttonStyle)) paused = !paused;
             if (paused) { DrawPause(); return; }
+
             if (!playerTurn || projectiles.Count > 0) return;
-            float panelH = sh * .22f;
+
+            float panelH = sh * .28f;
             Box(new Rect(12, sh - panelH - 10, sw - 95, panelH), new Color(.03f,.05f,.1f,.92f));
-            GUI.Label(new Rect(30, sh - panelH, 180, 36), "ANGLE " + Mathf.RoundToInt(aimAngle) + "°", smallStyle);
-            aimAngle = GUI.HorizontalSlider(new Rect(185, sh - panelH + 13, sw * .25f, 30), aimAngle, 10, 80);
-            GUI.Label(new Rect(30, sh - panelH + 50, 180, 36), "POWER " + Mathf.RoundToInt(shotPower), smallStyle);
-            shotPower = GUI.HorizontalSlider(new Rect(185, sh - panelH + 63, sw * .25f, 30), shotPower, 20, 85);
-            Rect wp = new Rect(sw * .5f, sh - panelH + 10, sw * .22f, 62);
+
+            // Angle & Power
+            GUI.Label(new Rect(30, sh - panelH + 8, 180, 30), "ANGLE " + Mathf.RoundToInt(aimAngle) + "°", smallStyle);
+            aimAngle = GUI.HorizontalSlider(new Rect(185, sh - panelH + 18, sw * .22f, 26), aimAngle, 10, 80);
+
+            GUI.Label(new Rect(30, sh - panelH + 48, 180, 30), "POWER " + Mathf.RoundToInt(shotPower), smallStyle);
+            shotPower = GUI.HorizontalSlider(new Rect(185, sh - panelH + 58, sw * .22f, 26), shotPower, 20, 85);
+
+            // Weapon selector
+            Rect wp = new Rect(sw * .48f, sh - panelH + 8, sw * .20f, 55);
             Box(wp, new Color(.08f,.11f,.19f,.95f));
-            GUI.Label(new Rect(wp.x + 10, wp.y + 4, wp.width - 20, 28), weapons[weaponIndex].name, smallStyle);
-            if (GUI.Button(new Rect(wp.x + 8, wp.y + 33, 45, 25), "<”)) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
-            if (GUI.Button(new Rect(wp.x + wp.width - 53, wp.y + 33, 45, 25), ">”)) weaponIndex = (weaponIndex + 1) % weapons.Length;
-            if (BigButton(new Rect(sw * .75f, sh - panelH + 8, sw * .15f, panelH - 25), "FIRE")) PlayerShoot();
+            GUI.Label(new Rect(wp.x + 8, wp.y + 4, wp.width - 16, 24), weapons[weaponIndex].name, smallStyle);
+            if (GUI.Button(new Rect(wp.x + 6, wp.y + 28, 38, 22), "<”)) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + wp.width - 46, wp.y + 28, 38, 22), ">”)) weaponIndex = (weaponIndex + 1) % weapons.Length;
+
+            // === NEW: Tank Movement Buttons (Stage B) ===
+            float fuelPercent = playerFuel / maxFuelPerTurn;
+            GUI.Label(new Rect(30, sh - panelH + 95, 200, 28), $"FUEL {Mathf.RoundToInt(playerFuel)} / {maxFuelPerTurn}", smallStyle);
+            DrawHealth(new Rect(180, sh - panelH + 100, 120, 16), fuelPercent, new Color(.95f, .75f, .2f));
+
+            if (playerFuel > 8f)
+            {
+                if (GUI.Button(new Rect(sw * .70f, sh - panelH + 90, 95, 38), "← MOVE"))
+                {
+                    MovePlayerTank(-1f);
+                }
+                if (GUI.Button(new Rect(sw * .82f, sh - panelH + 90, 95, 38), "MOVE →"))
+                {
+                    MovePlayerTank(1f);
+                }
+            }
+
+            // Fire button
+            if (BigButton(new Rect(sw * .75f, sh - panelH + 8, sw * .15f, panelH - 55), "FIRE"))
+            {
+                PlayerShoot();
+            }
         }
 
         private void DrawPause()
@@ -424,6 +458,38 @@ namespace TrajectoryTitans
             if (BigButton(new Rect(Screen.width*.38f, Screen.height*.42f, Screen.width*.24f, 65), "RESUME")) paused = false;
             if (BigButton(new Rect(Screen.width*.38f, Screen.height*.55f, Screen.width*.24f, 65), "RESTART")) StartBattle();
             if (BigButton(new Rect(Screen.width*.38f, Screen.height*.68f, Screen.width*.24f, 55), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
+        }
+
+        // === NEW: Tank Movement Logic (Stage B) ===
+        private void MovePlayerTank(float direction)
+        {
+            if (!playerTurn || projectiles.Count > 0 || playerFuel <= 0) return;
+
+            float moveAmount = moveSpeed * direction;
+            float newX = player.x + moveAmount;
+
+            // Prevent moving too close to enemy or off map
+            float minDistance = 3.5f;
+            if (Mathf.Abs(newX - enemy.x) < minDistance) return;
+            if (newX < -12f || newX > 12f) return;
+
+            // Check terrain height at new position
+            float targetHeight = TerrainHeight(newX);
+            if (Mathf.Abs(targetHeight - player.y) > 1.8f) return; // too steep
+
+            // Perform movement
+            player.x = newX;
+            player.y = targetHeight + 0.55f;
+            player.root.transform.position = new Vector3(player.x, player.y, 0);
+
+            // Consume fuel
+            playerFuel = Mathf.Max(0, playerFuel - 12f);
+
+            // Update trajectory preview
+            ClearTrajectory();
+            ShowTrajectory();
+
+            Toast(direction > 0 ? "Moved right" : "Moved left");
         }
 
         private void PlayerShoot()
@@ -488,20 +554,16 @@ namespace TrajectoryTitans
 
         private void Explode(ProjectileSim p)
         {
-            // === IMPROVED EXPLOSION VISUALS (Stage A) ===
             float impactRadius = p.weapon.radius;
             Vector2 impactPos = p.position;
 
-            // Dynamic camera shake based on weapon power
             cameraShake = 0.38f;
             cameraShakeIntensity = Mathf.Clamp(impactRadius * 0.9f, 0.8f, 2.8f);
 
-            // Central bright flash
             var flash = CreateCircle("ExplosionFlash", impactPos, impactRadius * 0.9f, Color.white, 15);
             flash.GetComponent<SpriteRenderer>().color = new Color(1f, 0.95f, 0.8f, 0.9f);
             Destroy(flash, 0.12f);
 
-            // Main explosion core
             for (int i = 0; i < 18; i++)
             {
                 float angle = i * 20f;
@@ -511,7 +573,6 @@ namespace TrajectoryTitans
                 Destroy(core, UnityEngine.Random.Range(0.25f, 0.45f));
             }
 
-            // Secondary debris / sparks
             for (int i = 0; i < 12; i++)
             {
                 Vector2 offset = UnityEngine.Random.insideUnitCircle * impactRadius * 0.7f;
@@ -520,22 +581,17 @@ namespace TrajectoryTitans
                 Destroy(debris, UnityEngine.Random.Range(0.15f, 0.35f));
             }
 
-            // Extra ring effect for heavy weapons
             if (p.weapon.heavy)
             {
                 var ring = CreateCircle("Shockwave", impactPos, impactRadius * 1.1f, new Color(1f, 0.6f, 0.2f, 0.6f), 9);
                 Destroy(ring, 0.22f);
             }
 
-            // Call terrain deformation
             DeformTerrain(impactPos, impactRadius);
-
-            // Apply damage
             DamageTank(player, impactPos, p.weapon, p.enemy);
             DamageTank(enemy, impactPos, p.weapon, !p.enemy);
 
             if (save.vibration && Application.isMobilePlatform) Handheld.Vibrate();
-
             CheckBattleEnd();
 
             if (!battleEnded && projectiles.Count <= 1)
@@ -543,6 +599,7 @@ namespace TrajectoryTitans
                 if (p.enemy) 
                 { 
                     playerTurn = true; 
+                    playerFuel = maxFuelPerTurn; // Reset fuel at start of turn
                     turnNumber++; 
                     wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f); 
                     Toast("Your turn"); 
@@ -555,7 +612,6 @@ namespace TrajectoryTitans
             }
         }
 
-        // Terrain Deformation
         private void DeformTerrain(Vector2 impact, float radius)
         {
             float deformRadius = radius * 1.6f;
