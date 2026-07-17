@@ -14,15 +14,16 @@ PlayerSettings:
   targetDevice: 2
   useOnDemandResources: 0
   accelerometerFrequency: 60
-  bundleVersion: 0.1.1
+  bundleVersion: 0.1.2
   applicationIdentifier:
     Android: com.desertarcade.trajectorytitans
-  AndroidBundleVersionCode: 2
-  AndroidMinSdkVersion: 23
-  AndroidTargetSdkVersion: 0
+  AndroidBundleVersionCode: 3
+  AndroidMinSdkVersion: 22
+  AndroidTargetSdkVersion: 33
   scriptingBackend:
     Android: 1
   targetArchitectures: 3
+  AndroidTargetArchitectures: 3
   stripEngineCode: 1
   managedStrippingLevel:
     Android: 1
