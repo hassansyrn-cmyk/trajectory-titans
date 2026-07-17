@@ -112,7 +112,7 @@ namespace TrajectoryTitans
         private float cameraShakeIntensity;
         private Vector3 cameraBase;
 
-        // === NEW: Tank Movement System (Stage B) ===
+        // Tank Movement System (Stage B)
         private float playerFuel = 80f;
         private float maxFuelPerTurn = 80f;
         private float moveSpeed = 1.8f;
@@ -199,7 +199,7 @@ namespace TrajectoryTitans
                 float shake = Mathf.Sin(Time.time * 45f) * cameraShakeIntensity * (cameraShake / 0.4f);
                 cam.transform.position = cameraBase + new Vector3(shake * 0.6f, shake * 0.4f, 0);
             }
-            else 
+            else
             {
                 cam.transform.position = cameraBase;
             }
@@ -404,7 +404,7 @@ namespace TrajectoryTitans
             GUI.Label(new Rect(sw - sw * .28f, 20, sw * .25f, 28), mode == BattleMode.Training ? "TARGET DUMMY" : "RIVAL UNIT", smallStyle);
             DrawHealth(new Rect(sw - sw * .26f, 52, sw * .24f, 18), enemy.health / enemy.maxHealth, new Color(.95f,.25f,.2f));
             Box(new Rect(sw * .405f, 12, sw * .19f, 62), new Color(.03f,.05f,.1f,.9f));
-            GUI.Label(new Rect(sw * .415f, 18, sw * .17f, 45), "WIND " + (wind >= 0 ? "→ " : "← ") + Mathf.Abs(wind).ToString("0.0"), centerStyle);
+            GUI.Label(new Rect(sw * .415f, 18, sw * .17f, 45), "WIND " + (wind >= 0 ? "> " : "< ") + Mathf.Abs(wind).ToString("0.0"), centerStyle);
             if (GUI.Button(new Rect(sw - 72, sh - 64, 55, 45), "II", buttonStyle)) paused = !paused;
             if (paused) { DrawPause(); return; }
 
@@ -414,7 +414,7 @@ namespace TrajectoryTitans
             Box(new Rect(12, sh - panelH - 10, sw - 95, panelH), new Color(.03f,.05f,.1f,.92f));
 
             // Angle & Power
-            GUI.Label(new Rect(30, sh - panelH + 8, 180, 30), "ANGLE " + Mathf.RoundToInt(aimAngle) + "°", smallStyle);
+            GUI.Label(new Rect(30, sh - panelH + 8, 180, 30), "ANGLE " + Mathf.RoundToInt(aimAngle) + " deg", smallStyle);
             aimAngle = GUI.HorizontalSlider(new Rect(185, sh - panelH + 18, sw * .22f, 26), aimAngle, 10, 80);
 
             GUI.Label(new Rect(30, sh - panelH + 48, 180, 30), "POWER " + Mathf.RoundToInt(shotPower), smallStyle);
@@ -424,21 +424,21 @@ namespace TrajectoryTitans
             Rect wp = new Rect(sw * .48f, sh - panelH + 8, sw * .20f, 55);
             Box(wp, new Color(.08f,.11f,.19f,.95f));
             GUI.Label(new Rect(wp.x + 8, wp.y + 4, wp.width - 16, 24), weapons[weaponIndex].name, smallStyle);
-            if (GUI.Button(new Rect(wp.x + 6, wp.y + 28, 38, 22), "<”)) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
-            if (GUI.Button(new Rect(wp.x + wp.width - 46, wp.y + 28, 38, 22), ">”)) weaponIndex = (weaponIndex + 1) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + 6, wp.y + 28, 38, 22), "<")) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + wp.width - 46, wp.y + 28, 38, 22), ">")) weaponIndex = (weaponIndex + 1) % weapons.Length;
 
-            // === NEW: Tank Movement Buttons (Stage B) ===
+            // Tank Movement (Stage B)
             float fuelPercent = playerFuel / maxFuelPerTurn;
-            GUI.Label(new Rect(30, sh - panelH + 95, 200, 28), $"FUEL {Mathf.RoundToInt(playerFuel)} / {maxFuelPerTurn}", smallStyle);
+            GUI.Label(new Rect(30, sh - panelH + 95, 200, 28), "FUEL " + Mathf.RoundToInt(playerFuel) + " / " + maxFuelPerTurn, smallStyle);
             DrawHealth(new Rect(180, sh - panelH + 100, 120, 16), fuelPercent, new Color(.95f, .75f, .2f));
 
             if (playerFuel > 8f)
             {
-                if (GUI.Button(new Rect(sw * .70f, sh - panelH + 90, 95, 38), "← MOVE"))
+                if (GUI.Button(new Rect(sw * .70f, sh - panelH + 90, 95, 38), "< MOVE"))
                 {
                     MovePlayerTank(-1f);
                 }
-                if (GUI.Button(new Rect(sw * .82f, sh - panelH + 90, 95, 38), "MOVE →"))
+                if (GUI.Button(new Rect(sw * .82f, sh - panelH + 90, 95, 38), "MOVE >"))
                 {
                     MovePlayerTank(1f);
                 }
@@ -460,7 +460,6 @@ namespace TrajectoryTitans
             if (BigButton(new Rect(Screen.width*.38f, Screen.height*.68f, Screen.width*.24f, 55), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
         }
 
-        // === NEW: Tank Movement Logic (Stage B) ===
         private void MovePlayerTank(float direction)
         {
             if (!playerTurn || projectiles.Count > 0 || playerFuel <= 0) return;
@@ -468,24 +467,19 @@ namespace TrajectoryTitans
             float moveAmount = moveSpeed * direction;
             float newX = player.x + moveAmount;
 
-            // Prevent moving too close to enemy or off map
             float minDistance = 3.5f;
             if (Mathf.Abs(newX - enemy.x) < minDistance) return;
             if (newX < -12f || newX > 12f) return;
 
-            // Check terrain height at new position
             float targetHeight = TerrainHeight(newX);
-            if (Mathf.Abs(targetHeight - player.y) > 1.8f) return; // too steep
+            if (Mathf.Abs(targetHeight - player.y) > 1.8f) return;
 
-            // Perform movement
             player.x = newX;
             player.y = targetHeight + 0.55f;
             player.root.transform.position = new Vector3(player.x, player.y, 0);
 
-            // Consume fuel
             playerFuel = Mathf.Max(0, playerFuel - 12f);
 
-            // Update trajectory preview
             ClearTrajectory();
             ShowTrajectory();
 
@@ -596,18 +590,18 @@ namespace TrajectoryTitans
 
             if (!battleEnded && projectiles.Count <= 1)
             {
-                if (p.enemy) 
-                { 
-                    playerTurn = true; 
-                    playerFuel = maxFuelPerTurn; // Reset fuel at start of turn
-                    turnNumber++; 
-                    wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f); 
-                    Toast("Your turn"); 
-                    ShowTrajectory(); 
+                if (p.enemy)
+                {
+                    playerTurn = true;
+                    playerFuel = maxFuelPerTurn;
+                    turnNumber++;
+                    wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f);
+                    Toast("Your turn");
+                    ShowTrajectory();
                 }
-                else 
-                { 
-                    turnDelay = 1.25f; 
+                else
+                {
+                    turnDelay = 1.25f;
                 }
             }
         }
@@ -770,7 +764,7 @@ namespace TrajectoryTitans
             if (!circle && squareSprite != null) return squareSprite;
             if (circle && circleSprite != null) return circleSprite;
             int s = 64; var tex = new Texture2D(s,s,TextureFormat.RGBA32,false); tex.filterMode = FilterMode.Bilinear;
-            for (int y=0;y=s;y++) for(int x=0;x=s;x++)
+            for (int y=0;y<s;y++) for(int x=0;x<s;x++)
             {
                 bool inside = !circle || Vector2.Distance(new Vector2(x,y),new Vector2(31.5f,31.5f)) <= 31.2f;
                 tex.SetPixel(x,y,inside?Color.white:Color.clear);
