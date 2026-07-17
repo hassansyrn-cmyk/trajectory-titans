@@ -76,6 +76,15 @@ namespace TrajectoryTitans
         public WeaponData weapon;
         public bool enemy;
         public float life;
+        public float trailTimer;
+    }
+
+    public class FloatText
+    {
+        public Vector2 pos;
+        public string text;
+        public float life;
+        public Color color;
     }
 
     public class GameRoot : MonoBehaviour
@@ -86,11 +95,12 @@ namespace TrajectoryTitans
         private BattleMode mode;
         private Camera cam;
         private Texture2D white;
-        private GUIStyle titleStyle, h1Style, bodyStyle, buttonStyle, smallStyle, centerStyle;
+        private GUIStyle titleStyle, h1Style, bodyStyle, buttonStyle, smallStyle, centerStyle, damageStyle;
         private readonly List<GameObject> worldObjects = new List<GameObject>();
         private readonly List<ProjectileSim> projectiles = new List<ProjectileSim>();
         private readonly List<GameObject> trajectoryDots = new List<GameObject>();
         private readonly List<string> combatLog = new List<string>();
+        private readonly List<FloatText> floatTexts = new List<FloatText>();
         private TankActor player, enemy;
         private bool playerTurn = true;
         private bool battleEnded;
@@ -112,7 +122,7 @@ namespace TrajectoryTitans
         private float cameraShakeIntensity;
         private Vector3 cameraBase;
 
-        // Tank Movement System (Stage B)
+        // Tank Movement (Stage B)
         private float playerFuel = 80f;
         private float maxFuelPerTurn = 80f;
         private float moveSpeed = 1.8f;
@@ -131,10 +141,10 @@ namespace TrajectoryTitans
 
         private readonly TankData[] tanks = new TankData[]
         {
-            new TankData("Dune Viper", "Balanced starter with precise handling", new Color(.15f,.75f,.38f), 100, .05f),
-            new TankData("Iron Bison", "Heavy armor and increased durability", new Color(.2f,.55f,.9f), 125, .15f),
-            new TankData("Crimson Lynx", "Aggressive frame with bonus weapon damage", new Color(.9f,.2f,.2f), 95, 0f),
-            new TankData("Nova Warden", "Elite shield system and high survivability", new Color(.65f,.25f,.95f), 115, .1f)
+            new TankData("Dune Viper", "Balanced starter with precise handling", new Color(.18f,.78f,.42f), 100, .05f),
+            new TankData("Iron Bison", "Heavy armor and increased durability", new Color(.22f,.52f,.92f), 125, .15f),
+            new TankData("Crimson Lynx", "Aggressive frame with bonus weapon damage", new Color(.92f,.22f,.22f), 95, 0f),
+            new TankData("Nova Warden", "Elite shield system and high survivability", new Color(.68f,.28f,.95f), 115, .1f)
         };
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -166,7 +176,7 @@ namespace TrajectoryTitans
             cam.tag = "MainCamera";
             cam.orthographic = true;
             cam.orthographicSize = 7.2f;
-            cam.backgroundColor = new Color(.07f, .11f, .2f);
+            cam.backgroundColor = new Color(.05f, .08f, .16f);
             cameraBase = new Vector3(0, 1.6f, -10);
             cam.transform.position = cameraBase;
             DontDestroyOnLoad(c);
@@ -186,6 +196,8 @@ namespace TrajectoryTitans
             buttonStyle.normal.textColor = Color.white;
             buttonStyle.hover.textColor = Color.white;
             buttonStyle.active.textColor = Color.yellow;
+            damageStyle = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(Screen.height * .032f), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            damageStyle.normal.textColor = new Color(1f, .35f, .25f);
         }
 
         private void Update()
@@ -193,11 +205,21 @@ namespace TrajectoryTitans
             safe = Screen.safeArea;
             if (messageTimer > 0) messageTimer -= Time.deltaTime;
 
+            // Update floating damage numbers
+            for (int i = floatTexts.Count - 1; i >= 0; i--)
+            {
+                floatTexts[i].life -= Time.deltaTime;
+                floatTexts[i].pos.y += Time.deltaTime * 1.8f;
+                if (floatTexts[i].life <= 0) floatTexts.RemoveAt(i);
+            }
+
             if (cameraShake > 0)
             {
                 cameraShake -= Time.deltaTime;
-                float shake = Mathf.Sin(Time.time * 45f) * cameraShakeIntensity * (cameraShake / 0.4f);
-                cam.transform.position = cameraBase + new Vector3(shake * 0.6f, shake * 0.4f, 0);
+                float t = cameraShake / 0.45f;
+                float shake = Mathf.Sin(Time.time * 55f) * cameraShakeIntensity * t;
+                float shakeY = Mathf.Cos(Time.time * 38f) * cameraShakeIntensity * 0.5f * t;
+                cam.transform.position = cameraBase + new Vector3(shake * 0.7f, shakeY * 0.5f, 0);
             }
             else
             {
@@ -229,22 +251,34 @@ namespace TrajectoryTitans
                 case ScreenState.Result: DrawResult(); break;
             }
             if (messageTimer > 0) DrawToast(message);
+
+            // Draw floating damage numbers
+            if (screen == ScreenState.Battle)
+            {
+                foreach (var ft in floatTexts)
+                {
+                    Vector3 screenPos = cam.WorldToScreenPoint(new Vector3(ft.pos.x, ft.pos.y, 0));
+                    float alpha = Mathf.Clamp01(ft.life / 0.9f);
+                    damageStyle.normal.textColor = new Color(ft.color.r, ft.color.g, ft.color.b, alpha);
+                    GUI.Label(new Rect(screenPos.x - 40, Screen.height - screenPos.y - 20, 80, 40), ft.text, damageStyle);
+                }
+            }
         }
 
         private void DrawBackdrop()
         {
-            GUI.color = new Color(.035f, .06f, .12f, 1f);
+            GUI.color = new Color(.04f, .06f, .12f, 1f);
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), white);
-            GUI.color = new Color(.08f, .18f, .32f, 1f);
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height * .43f), white);
+            GUI.color = new Color(.07f, .14f, .28f, 1f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height * .42f), white);
             GUI.color = Color.white;
         }
 
         private void DrawTopCurrency()
         {
-            float w = Screen.width * .18f;
-            Box(new Rect(Screen.width - w - 20, 15, w, 45), new Color(.06f, .09f, .16f, .94f));
-            GUI.Label(new Rect(Screen.width - w, 18, w - 10, 40), "COINS  " + save.coins + "    GEMS  " + save.gems, smallStyle);
+            float w = Screen.width * .2f;
+            Box(new Rect(Screen.width - w - 18, 12, w, 42), new Color(.05f, .08f, .14f, .95f));
+            GUI.Label(new Rect(Screen.width - w + 8, 16, w - 16, 34), "COINS " + save.coins + "   GEMS " + save.gems, smallStyle);
         }
 
         private void DrawMenu()
@@ -252,7 +286,7 @@ namespace TrajectoryTitans
             DrawBackdrop();
             float sw = Screen.width, sh = Screen.height;
             GUI.Label(new Rect(0, sh * .06f, sw, sh * .12f), "TRAJECTORY TITANS", titleStyle);
-            GUI.Label(new Rect(0, sh * .17f, sw, sh * .055f), "Aim smart. Master the wind. Rule the arena.", centerStyle);
+            GUI.Label(new Rect(0, sh * .17f, sw, sh * .05f), "Aim smart. Master the wind. Rule the arena.", centerStyle);
             DrawTopCurrency();
             float bw = sw * .34f, bh = sh * .09f, x = (sw - bw) * .5f, y = sh * .29f;
             if (BigButton(new Rect(x, y, bw, bh), "CAMPAIGN")) { mode = BattleMode.Campaign; StartBattle(); }
@@ -262,39 +296,43 @@ namespace TrajectoryTitans
             if (BigButton(new Rect(sw * .2f, sy, smallW, bh * .8f), "GARAGE")) screen = ScreenState.Garage;
             if (BigButton(new Rect(sw * .41f, sy, smallW, bh * .8f), "DAILY")) screen = ScreenState.Daily;
             if (BigButton(new Rect(sw * .62f, sy, smallW, bh * .8f), "SETTINGS")) screen = ScreenState.Settings;
-            GUI.Label(new Rect(0, sh * .84f, sw, 40), "Level " + save.level + "  •  " + save.wins + " victories  •  Original 2D artillery prototype", centerStyle);
+            GUI.Label(new Rect(0, sh * .84f, sw, 40), "Level " + save.level + "  |  " + save.wins + " victories", centerStyle);
         }
 
         private void DrawGarage()
         {
             DrawBackdrop();
-            GUI.Label(new Rect(30, 20, Screen.width * .55f, 70), "GARAGE & ARMORY", h1Style);
+            GUI.Label(new Rect(30, 18, Screen.width * .55f, 60), "GARAGE & ARMORY", h1Style);
             DrawTopCurrency();
             if (BackButton()) { screen = ScreenState.Menu; Save(); return; }
-            float top = Screen.height * .15f;
-            GUI.Label(new Rect(40, top, 300, 45), "COMBAT VEHICLES", h1Style);
+            float top = Screen.height * .14f;
+            GUI.Label(new Rect(40, top, 300, 40), "COMBAT VEHICLES", h1Style);
             for (int i = 0; i < tanks.Length; i++)
             {
                 float x = 40 + i * (Screen.width - 100) / 4f;
-                Rect r = new Rect(x, top + 55, (Screen.width - 140) / 4f, Screen.height * .24f);
-                Box(r, save.selectedTank == i ? new Color(.16f, .45f, .55f, .95f) : new Color(.07f, .11f, .19f, .95f));
-                GUI.color = tanks[i].body; GUI.DrawTexture(new Rect(r.x + 18, r.y + 18, r.width - 36, 36), white); GUI.color = Color.white;
-                GUI.Label(new Rect(r.x + 12, r.y + 62, r.width - 24, 35), tanks[i].name, smallStyle);
-                GUI.Label(new Rect(r.x + 12, r.y + 96, r.width - 24, 55), tanks[i].trait, smallStyle);
-                GUI.Label(new Rect(r.x + 12, r.y + r.height - 45, r.width - 24, 32), "HP " + tanks[i].health + "  LV." + save.tankLevels[i], smallStyle);
+                Rect r = new Rect(x, top + 50, (Screen.width - 140) / 4f, Screen.height * .23f);
+                Box(r, save.selectedTank == i ? new Color(.14f, .42f, .52f, .95f) : new Color(.06f, .09f, .16f, .95f));
+                GUI.color = tanks[i].body;
+                GUI.DrawTexture(new Rect(r.x + 20, r.y + 16, r.width - 40, 32), white);
+                GUI.color = Color.white;
+                GUI.Label(new Rect(r.x + 10, r.y + 55, r.width - 20, 30), tanks[i].name, smallStyle);
+                GUI.Label(new Rect(r.x + 10, r.y + 88, r.width - 20, 50), tanks[i].trait, smallStyle);
+                GUI.Label(new Rect(r.x + 10, r.y + r.height - 40, r.width - 20, 28), "HP " + tanks[i].health + "  LV." + save.tankLevels[i], smallStyle);
                 if (GUI.Button(r, "", GUIStyle.none)) save.selectedTank = i;
             }
-            float wy = Screen.height * .48f;
-            GUI.Label(new Rect(40, wy, 350, 45), "WEAPON LOADOUT", h1Style);
-            scroll = GUI.BeginScrollView(new Rect(35, wy + 45, Screen.width - 70, Screen.height * .37f), scroll, new Rect(0, 0, weapons.Length * 230, Screen.height * .31f));
+            float wy = Screen.height * .47f;
+            GUI.Label(new Rect(40, wy, 350, 40), "WEAPON LOADOUT", h1Style);
+            scroll = GUI.BeginScrollView(new Rect(35, wy + 42, Screen.width - 70, Screen.height * .38f), scroll, new Rect(0, 0, weapons.Length * 230, Screen.height * .32f));
             for (int i = 0; i < weapons.Length; i++)
             {
-                Rect r = new Rect(i * 225, 5, 210, Screen.height * .28f);
-                Box(r, save.selectedWeapon == i ? new Color(.45f, .25f, .08f, .95f) : new Color(.07f, .11f, .19f, .95f));
-                GUI.color = weapons[i].color; GUI.DrawTexture(new Rect(r.x + 12, r.y + 12, r.width - 24, 10), white); GUI.color = Color.white;
-                GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 34), weapons[i].name, smallStyle);
+                Rect r = new Rect(i * 225, 5, 210, Screen.height * .29f);
+                Box(r, save.selectedWeapon == i ? new Color(.42f, .24f, .08f, .95f) : new Color(.06f, .09f, .16f, .95f));
+                GUI.color = weapons[i].color;
+                GUI.DrawTexture(new Rect(r.x + 12, r.y + 12, r.width - 24, 10), white);
+                GUI.color = Color.white;
+                GUI.Label(new Rect(r.x + 12, r.y + 30, r.width - 24, 32), weapons[i].name, smallStyle);
                 GUI.Label(new Rect(r.x + 12, r.y + 65, r.width - 24, 70), weapons[i].description, smallStyle);
-                GUI.Label(new Rect(r.x + 12, r.y + r.height - 48, r.width - 24, 34), "DMG " + Mathf.RoundToInt(weapons[i].damage) + "  LV." + save.weaponLevels[i], smallStyle);
+                GUI.Label(new Rect(r.x + 12, r.y + r.height - 45, r.width - 24, 32), "DMG " + Mathf.RoundToInt(weapons[i].damage) + "  LV." + save.weaponLevels[i], smallStyle);
                 if (GUI.Button(r, "", GUIStyle.none)) save.selectedWeapon = i;
             }
             GUI.EndScrollView();
@@ -303,17 +341,17 @@ namespace TrajectoryTitans
         private void DrawDaily()
         {
             DrawBackdrop();
-            GUI.Label(new Rect(30, 20, 600, 70), "DAILY COMMAND CENTER", h1Style);
+            GUI.Label(new Rect(30, 18, 600, 60), "DAILY COMMAND CENTER", h1Style);
             if (BackButton()) { screen = ScreenState.Menu; return; }
             DrawTopCurrency();
             string today = DateTime.UtcNow.ToString("yyyy-MM-dd");
             bool claimed = save.lastDaily == today;
             float w = Screen.width * .55f, h = Screen.height * .52f;
             Rect card = new Rect((Screen.width - w) / 2, Screen.height * .2f, w, h);
-            Box(card, new Color(.08f, .13f, .23f, .97f));
-            GUI.Label(new Rect(card.x + 25, card.y + 25, card.width - 50, 55), "TODAY'S SUPPLY DROP", h1Style);
-            GUI.Label(new Rect(card.x + 25, card.y + 95, card.width - 50, 80), "Return every day to collect currency. Rewards support progression without blocking core gameplay.", bodyStyle);
-            GUI.Label(new Rect(card.x + 25, card.y + 185, card.width - 50, 60), "REWARD: 250 COINS + 3 GEMS", h1Style);
+            Box(card, new Color(.07f, .12f, .22f, .97f));
+            GUI.Label(new Rect(card.x + 25, card.y + 25, card.width - 50, 50), "TODAY'S SUPPLY DROP", h1Style);
+            GUI.Label(new Rect(card.x + 25, card.y + 90, card.width - 50, 80), "Return every day to collect currency and keep progressing.", bodyStyle);
+            GUI.Label(new Rect(card.x + 25, card.y + 180, card.width - 50, 55), "REWARD: 250 COINS + 3 GEMS", h1Style);
             GUI.enabled = !claimed;
             if (BigButton(new Rect(card.x + card.width * .2f, card.y + card.height - 100, card.width * .6f, 65), claimed ? "ALREADY CLAIMED" : "CLAIM REWARD"))
             {
@@ -325,23 +363,23 @@ namespace TrajectoryTitans
         private void DrawSettings()
         {
             DrawBackdrop();
-            GUI.Label(new Rect(30, 20, 500, 70), "SETTINGS", h1Style);
+            GUI.Label(new Rect(30, 18, 500, 60), "SETTINGS", h1Style);
             if (BackButton()) { screen = ScreenState.Menu; Save(); return; }
             float x = Screen.width * .25f, y = Screen.height * .2f, w = Screen.width * .5f;
-            Box(new Rect(x - 35, y - 25, w + 70, Screen.height * .55f), new Color(.07f,.11f,.19f,.97f));
-            save.sound = GUI.Toggle(new Rect(x, y, w, 45), save.sound, "  Sound effects", bodyStyle);
-            save.vibration = GUI.Toggle(new Rect(x, y + 65, w, 45), save.vibration, "  Vibration feedback", bodyStyle);
-            save.trajectory = GUI.Toggle(new Rect(x, y + 130, w, 45), save.trajectory, "  Trajectory preview", bodyStyle);
-            GUI.Label(new Rect(x, y + 200, 250, 40), "Music volume", bodyStyle);
-            save.musicVolume = GUI.HorizontalSlider(new Rect(x + 250, y + 215, w - 270, 28), save.musicVolume, 0, 1);
-            GUI.Label(new Rect(x, y + 260, 250, 40), "Effects volume", bodyStyle);
-            save.sfxVolume = GUI.HorizontalSlider(new Rect(x + 250, y + 275, w - 270, 28), save.sfxVolume, 0, 1);
-            GUI.Label(new Rect(x, y + 330, w, 90), "Privacy-ready MVP: no analytics, ads SDK, account login, or personal-data collection is included.", smallStyle);
+            Box(new Rect(x - 30, y - 20, w + 60, Screen.height * .55f), new Color(.06f,.09f,.16f,.97f));
+            save.sound = GUI.Toggle(new Rect(x, y, w, 42), save.sound, "  Sound effects", bodyStyle);
+            save.vibration = GUI.Toggle(new Rect(x, y + 60, w, 42), save.vibration, "  Vibration feedback", bodyStyle);
+            save.trajectory = GUI.Toggle(new Rect(x, y + 120, w, 42), save.trajectory, "  Trajectory preview", bodyStyle);
+            GUI.Label(new Rect(x, y + 190, 240, 36), "Music volume", bodyStyle);
+            save.musicVolume = GUI.HorizontalSlider(new Rect(x + 240, y + 202, w - 260, 26), save.musicVolume, 0, 1);
+            GUI.Label(new Rect(x, y + 250, 240, 36), "Effects volume", bodyStyle);
+            save.sfxVolume = GUI.HorizontalSlider(new Rect(x + 240, y + 262, w - 260, 26), save.sfxVolume, 0, 1);
         }
 
         private void StartBattle()
         {
             ClearWorld();
+            floatTexts.Clear();
             screen = ScreenState.Battle;
             paused = false; battleEnded = false; playerTurn = true; turnNumber = 1;
             weaponIndex = save.selectedWeapon; aimAngle = 42; shotPower = 52;
@@ -357,15 +395,36 @@ namespace TrajectoryTitans
         {
             cam.orthographicSize = 7.2f;
             cameraBase = new Vector3(0, 1.6f, -10);
-            CreateRect("SkyGlow", new Vector2(0, 5), new Vector2(28, 10), new Color(.10f,.23f,.43f), -20);
-            CreateCircle("Moon", new Vector2(8.5f, 5.2f), 1.2f, new Color(1f,.7f,.3f), -18);
-            for (int i = 0; i < 12; i++) CreateCircle("Star", new Vector2(UnityEngine.Random.Range(-12f,12f), UnityEngine.Random.Range(3f,7f)), .05f, Color.white, -17);
-            for (int x = -13; x <= 13; x++)
+
+            // Sky layers
+            CreateRect("SkyTop", new Vector2(0, 6.5f), new Vector2(30, 8), new Color(.06f,.12f,.28f), -25);
+            CreateRect("SkyMid", new Vector2(0, 2.5f), new Vector2(30, 5), new Color(.09f,.18f,.36f), -24);
+            CreateCircle("Moon", new Vector2(7.8f, 5.4f), 1.15f, new Color(1f,.78f,.42f), -20);
+            CreateCircle("MoonGlow", new Vector2(7.8f, 5.4f), 1.6f, new Color(1f,.7f,.3f,.18f), -21);
+
+            for (int i = 0; i < 18; i++)
+            {
+                float sx = UnityEngine.Random.Range(-13f, 13f);
+                float sy = UnityEngine.Random.Range(2.8f, 7.2f);
+                float sz = UnityEngine.Random.Range(0.035f, 0.08f);
+                CreateCircle("Star", new Vector2(sx, sy), sz, new Color(1f,1f,1f, UnityEngine.Random.Range(0.5f,1f)), -19);
+            }
+
+            // Terrain with depth
+            for (int x = -14; x <= 14; x++)
             {
                 float y = TerrainHeight(x);
-                CreateRect("Terrain", new Vector2(x, y - 3.2f), new Vector2(1.05f, 6.5f), new Color(.15f + (x%2==0?.02f:0), .32f, .19f), -2);
-                CreateRect("Grass", new Vector2(x, y - .08f), new Vector2(1.08f, .22f), new Color(.28f,.62f,.25f), -1);
+                // Dirt body
+                CreateRect("Terrain", new Vector2(x, y - 3.4f), new Vector2(1.08f, 6.8f),
+                    new Color(0.22f + (x % 3 == 0 ? 0.03f : 0f), 0.16f, 0.10f), -3);
+                // Mid soil
+                CreateRect("Soil", new Vector2(x, y - 0.55f), new Vector2(1.08f, 0.7f),
+                    new Color(0.32f, 0.24f, 0.14f), -2);
+                // Grass top
+                CreateRect("Grass", new Vector2(x, y - 0.05f), new Vector2(1.1f, 0.22f),
+                    new Color(0.25f + (x % 2 == 0 ? 0.06f : 0f), 0.58f, 0.22f), -1);
             }
+
             player = CreateTank(-8.5f, false, tanks[save.selectedTank]);
             int enemyTank = mode == BattleMode.Training ? 1 : UnityEngine.Random.Range(0, tanks.Length);
             enemy = CreateTank(8.4f, true, tanks[enemyTank]);
@@ -376,76 +435,120 @@ namespace TrajectoryTitans
         private TankActor CreateTank(float x, bool isEnemy, TankData data)
         {
             var t = new TankActor { enemy = isEnemy, x = x, armor = data.armor };
-            t.y = TerrainHeight(x) + .55f;
-            t.maxHealth = t.health = data.health + (isEnemy ? campaignStage * 3 : (save.tankLevels[save.selectedTank]-1) * 6);
-            t.root = new GameObject(isEnemy ? "EnemyTank" : "PlayerTank"); Track(t.root);
+            t.y = TerrainHeight(x) + 0.58f;
+            t.maxHealth = t.health = data.health + (isEnemy ? campaignStage * 3 : (save.tankLevels[save.selectedTank] - 1) * 6);
+            t.root = new GameObject(isEnemy ? "EnemyTank" : "PlayerTank");
+            Track(t.root);
             t.root.transform.position = new Vector3(t.x, t.y, 0);
-            CreateChildRect(t.root.transform, "Hull", Vector2.zero, new Vector2(1.65f,.65f), data.body, 2);
-            CreateChildRect(t.root.transform, "Track", new Vector2(0,-.42f), new Vector2(1.9f,.32f), new Color(.08f,.09f,.12f), 3);
-            CreateChildCircle(t.root.transform, "WheelL", new Vector2(-.55f,-.42f), .24f, new Color(.25f,.27f,.3f), 4);
-            CreateChildCircle(t.root.transform, "WheelR", new Vector2(.55f,-.42f), .24f, new Color(.25f,.27f,.3f), 4);
-            var turretObj = CreateChildCircle(t.root.transform, "Turret", new Vector2(0,.42f), .48f, data.body * .9f, 4);
+
+            Color body = data.body;
+            Color dark = body * 0.55f;
+            Color darker = new Color(0.08f, 0.09f, 0.12f);
+            Color metal = new Color(0.35f, 0.37f, 0.42f);
+
+            // Tracks base
+            CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.48f), new Vector2(2.05f, 0.38f), darker, 1);
+            // Wheels
+            CreateChildCircle(t.root.transform, "Wheel1", new Vector2(-0.7f, -0.48f), 0.22f, metal, 3);
+            CreateChildCircle(t.root.transform, "Wheel2", new Vector2(-0.25f, -0.48f), 0.2f, metal, 3);
+            CreateChildCircle(t.root.transform, "Wheel3", new Vector2(0.25f, -0.48f), 0.2f, metal, 3);
+            CreateChildCircle(t.root.transform, "Wheel4", new Vector2(0.7f, -0.48f), 0.22f, metal, 3);
+
+            // Main hull
+            CreateChildRect(t.root.transform, "Hull", new Vector2(0, 0.02f), new Vector2(1.75f, 0.62f), body, 4);
+            // Armor plate on top of hull
+            CreateChildRect(t.root.transform, "Armor", new Vector2(0, 0.22f), new Vector2(1.45f, 0.22f), dark, 5);
+            // Side skirts
+            CreateChildRect(t.root.transform, "SkirtL", new Vector2(-0.95f, -0.15f), new Vector2(0.18f, 0.45f), dark, 3);
+            CreateChildRect(t.root.transform, "SkirtR", new Vector2(0.95f, -0.15f), new Vector2(0.18f, 0.45f), dark, 3);
+
+            // Turret
+            var turretObj = CreateChildCircle(t.root.transform, "Turret", new Vector2(0, 0.48f), 0.46f, body * 0.92f, 6);
             t.turret = turretObj.transform;
-            var barrel = CreateChildRect(t.turret, "Barrel", new Vector2(.65f,0), new Vector2(1.3f,.18f), new Color(.15f,.17f,.2f), 3);
-            barrel.transform.localPosition = new Vector3(isEnemy ? -.65f : .65f, 0, 0);
+            // Turret detail ring
+            CreateChildCircle(t.turret, "TurretRing", new Vector2(0, 0), 0.32f, dark, 7);
+
+            // Barrel
+            float barrelDir = isEnemy ? -1f : 1f;
+            var barrel = CreateChildRect(t.turret, "Barrel", new Vector2(0.7f * barrelDir, 0), new Vector2(1.35f, 0.16f), new Color(0.18f, 0.2f, 0.24f), 5);
+            // Muzzle brake
+            CreateChildRect(t.turret, "MuzzleBrake", new Vector2(1.35f * barrelDir, 0), new Vector2(0.22f, 0.26f), metal, 6);
+
             t.muzzle = new GameObject("Muzzle").transform;
             t.muzzle.SetParent(t.turret);
-            t.muzzle.localPosition = new Vector3(isEnemy ? -1.35f : 1.35f, 0, 0);
+            t.muzzle.localPosition = new Vector3(1.5f * barrelDir, 0, 0);
+
+            // Small antenna
+            CreateChildRect(t.root.transform, "Antenna", new Vector2(0.55f * barrelDir, 0.85f), new Vector2(0.06f, 0.45f), metal, 8);
+
             return t;
         }
 
         private void DrawBattleHUD()
         {
             float sw = Screen.width, sh = Screen.height;
-            Box(new Rect(15, 15, sw * .28f, 70), new Color(.03f,.05f,.1f,.9f));
-            GUI.Label(new Rect(30, 20, sw * .25f, 28), tanks[save.selectedTank].name, smallStyle);
-            DrawHealth(new Rect(30, 52, sw * .24f, 18), player.health / player.maxHealth, new Color(.2f,.85f,.35f));
-            Box(new Rect(sw - sw * .28f - 15, 15, sw * .28f, 70), new Color(.03f,.05f,.1f,.9f));
-            GUI.Label(new Rect(sw - sw * .28f, 20, sw * .25f, 28), mode == BattleMode.Training ? "TARGET DUMMY" : "RIVAL UNIT", smallStyle);
-            DrawHealth(new Rect(sw - sw * .26f, 52, sw * .24f, 18), enemy.health / enemy.maxHealth, new Color(.95f,.25f,.2f));
-            Box(new Rect(sw * .405f, 12, sw * .19f, 62), new Color(.03f,.05f,.1f,.9f));
-            GUI.Label(new Rect(sw * .415f, 18, sw * .17f, 45), "WIND " + (wind >= 0 ? "> " : "< ") + Mathf.Abs(wind).ToString("0.0"), centerStyle);
-            if (GUI.Button(new Rect(sw - 72, sh - 64, 55, 45), "II", buttonStyle)) paused = !paused;
+
+            // Player panel
+            Box(new Rect(12, 12, sw * .27f, 68), new Color(.04f, .06f, .11f, .92f));
+            GUI.Label(new Rect(24, 16, sw * .24f, 26), tanks[save.selectedTank].name, smallStyle);
+            DrawHealth(new Rect(24, 46, sw * .23f, 20), player.health / player.maxHealth, new Color(.25f, .88f, .4f));
+
+            // Enemy panel
+            Box(new Rect(sw - sw * .27f - 12, 12, sw * .27f, 68), new Color(.04f, .06f, .11f, .92f));
+            GUI.Label(new Rect(sw - sw * .27f, 16, sw * .24f, 26), mode == BattleMode.Training ? "TARGET DUMMY" : "RIVAL UNIT", smallStyle);
+            DrawHealth(new Rect(sw - sw * .25f, 46, sw * .23f, 20), enemy.health / enemy.maxHealth, new Color(.95f, .28f, .22f));
+
+            // Wind panel
+            Box(new Rect(sw * .38f, 12, sw * .24f, 52), new Color(.04f, .06f, .11f, .92f));
+            string windDir = wind >= 0 ? ">" : "<";
+            GUI.Label(new Rect(sw * .39f, 18, sw * .22f, 40), "WIND  " + windDir + " " + Mathf.Abs(wind).ToString("0.0"), centerStyle);
+
+            // Pause
+            if (GUI.Button(new Rect(sw - 68, sh - 58, 52, 42), "II", buttonStyle)) paused = !paused;
             if (paused) { DrawPause(); return; }
 
-            if (!playerTurn || projectiles.Count > 0) return;
+            if (!playerTurn || projectiles.Count > 0)
+            {
+                // Show turn status when waiting
+                if (!playerTurn && projectiles.Count == 0)
+                {
+                    Box(new Rect(sw * .35f, sh * .42f, sw * .3f, 50), new Color(.05f, .07f, .12f, .85f));
+                    GUI.Label(new Rect(sw * .35f, sh * .43f, sw * .3f, 40), "ENEMY TURN...", centerStyle);
+                }
+                return;
+            }
 
-            float panelH = sh * .28f;
-            Box(new Rect(12, sh - panelH - 10, sw - 95, panelH), new Color(.03f,.05f,.1f,.92f));
+            float panelH = sh * .29f;
+            Box(new Rect(10, sh - panelH - 8, sw - 90, panelH), new Color(.04f, .06f, .11f, .93f));
 
-            // Angle & Power
-            GUI.Label(new Rect(30, sh - panelH + 8, 180, 30), "ANGLE " + Mathf.RoundToInt(aimAngle) + " deg", smallStyle);
-            aimAngle = GUI.HorizontalSlider(new Rect(185, sh - panelH + 18, sw * .22f, 26), aimAngle, 10, 80);
+            // Angle
+            GUI.Label(new Rect(26, sh - panelH + 10, 160, 28), "ANGLE  " + Mathf.RoundToInt(aimAngle) + " deg", smallStyle);
+            aimAngle = GUI.HorizontalSlider(new Rect(175, sh - panelH + 18, sw * .22f, 24), aimAngle, 10, 80);
 
-            GUI.Label(new Rect(30, sh - panelH + 48, 180, 30), "POWER " + Mathf.RoundToInt(shotPower), smallStyle);
-            shotPower = GUI.HorizontalSlider(new Rect(185, sh - panelH + 58, sw * .22f, 26), shotPower, 20, 85);
+            // Power
+            GUI.Label(new Rect(26, sh - panelH + 48, 160, 28), "POWER  " + Mathf.RoundToInt(shotPower), smallStyle);
+            shotPower = GUI.HorizontalSlider(new Rect(175, sh - panelH + 56, sw * .22f, 24), shotPower, 20, 85);
 
-            // Weapon selector
-            Rect wp = new Rect(sw * .48f, sh - panelH + 8, sw * .20f, 55);
-            Box(wp, new Color(.08f,.11f,.19f,.95f));
-            GUI.Label(new Rect(wp.x + 8, wp.y + 4, wp.width - 16, 24), weapons[weaponIndex].name, smallStyle);
-            if (GUI.Button(new Rect(wp.x + 6, wp.y + 28, 38, 22), "<")) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
-            if (GUI.Button(new Rect(wp.x + wp.width - 46, wp.y + 28, 38, 22), ">")) weaponIndex = (weaponIndex + 1) % weapons.Length;
+            // Weapon
+            Rect wp = new Rect(sw * .47f, sh - panelH + 10, sw * .2f, 52);
+            Box(wp, new Color(.08f, .11f, .18f, .95f));
+            GUI.Label(new Rect(wp.x + 8, wp.y + 4, wp.width - 16, 22), weapons[weaponIndex].name, smallStyle);
+            if (GUI.Button(new Rect(wp.x + 6, wp.y + 28, 36, 20), "<")) weaponIndex = (weaponIndex - 1 + weapons.Length) % weapons.Length;
+            if (GUI.Button(new Rect(wp.x + wp.width - 44, wp.y + 28, 36, 20), ">")) weaponIndex = (weaponIndex + 1) % weapons.Length;
 
-            // Tank Movement (Stage B)
+            // Fuel + Move
             float fuelPercent = playerFuel / maxFuelPerTurn;
-            GUI.Label(new Rect(30, sh - panelH + 95, 200, 28), "FUEL " + Mathf.RoundToInt(playerFuel) + " / " + maxFuelPerTurn, smallStyle);
-            DrawHealth(new Rect(180, sh - panelH + 100, 120, 16), fuelPercent, new Color(.95f, .75f, .2f));
+            GUI.Label(new Rect(26, sh - panelH + 92, 180, 26), "FUEL  " + Mathf.RoundToInt(playerFuel) + " / " + maxFuelPerTurn, smallStyle);
+            DrawHealth(new Rect(170, sh - panelH + 98, 130, 16), fuelPercent, new Color(.95f, .72f, .18f));
 
             if (playerFuel > 8f)
             {
-                if (GUI.Button(new Rect(sw * .70f, sh - panelH + 90, 95, 38), "< MOVE"))
-                {
-                    MovePlayerTank(-1f);
-                }
-                if (GUI.Button(new Rect(sw * .82f, sh - panelH + 90, 95, 38), "MOVE >"))
-                {
-                    MovePlayerTank(1f);
-                }
+                if (GUI.Button(new Rect(sw * .68f, sh - panelH + 88, 90, 36), "< MOVE")) MovePlayerTank(-1f);
+                if (GUI.Button(new Rect(sw * .80f, sh - panelH + 88, 90, 36), "MOVE >")) MovePlayerTank(1f);
             }
 
-            // Fire button
-            if (BigButton(new Rect(sw * .75f, sh - panelH + 8, sw * .15f, panelH - 55), "FIRE"))
+            // Fire
+            if (BigButton(new Rect(sw * .74f, sh - panelH + 8, sw * .15f, panelH - 60), "FIRE"))
             {
                 PlayerShoot();
             }
@@ -453,11 +556,11 @@ namespace TrajectoryTitans
 
         private void DrawPause()
         {
-            Box(new Rect(Screen.width*.3f, Screen.height*.2f, Screen.width*.4f, Screen.height*.58f), new Color(.03f,.05f,.1f,.98f));
-            GUI.Label(new Rect(Screen.width*.3f, Screen.height*.25f, Screen.width*.4f, 60), "PAUSED", titleStyle);
-            if (BigButton(new Rect(Screen.width*.38f, Screen.height*.42f, Screen.width*.24f, 65), "RESUME")) paused = false;
-            if (BigButton(new Rect(Screen.width*.38f, Screen.height*.55f, Screen.width*.24f, 65), "RESTART")) StartBattle();
-            if (BigButton(new Rect(Screen.width*.38f, Screen.height*.68f, Screen.width*.24f, 55), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
+            Box(new Rect(Screen.width * .3f, Screen.height * .2f, Screen.width * .4f, Screen.height * .55f), new Color(.04f, .06f, .11f, .97f));
+            GUI.Label(new Rect(Screen.width * .3f, Screen.height * .24f, Screen.width * .4f, 55), "PAUSED", titleStyle);
+            if (BigButton(new Rect(Screen.width * .37f, Screen.height * .4f, Screen.width * .26f, 60), "RESUME")) paused = false;
+            if (BigButton(new Rect(Screen.width * .37f, Screen.height * .52f, Screen.width * .26f, 60), "RESTART")) StartBattle();
+            if (BigButton(new Rect(Screen.width * .37f, Screen.height * .64f, Screen.width * .26f, 55), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
         }
 
         private void MovePlayerTank(float direction)
@@ -467,22 +570,20 @@ namespace TrajectoryTitans
             float moveAmount = moveSpeed * direction;
             float newX = player.x + moveAmount;
 
-            float minDistance = 3.5f;
-            if (Mathf.Abs(newX - enemy.x) < minDistance) return;
+            if (Mathf.Abs(newX - enemy.x) < 3.5f) return;
             if (newX < -12f || newX > 12f) return;
 
             float targetHeight = TerrainHeight(newX);
             if (Mathf.Abs(targetHeight - player.y) > 1.8f) return;
 
             player.x = newX;
-            player.y = targetHeight + 0.55f;
+            player.y = targetHeight + 0.58f;
             player.root.transform.position = new Vector3(player.x, player.y, 0);
 
             playerFuel = Mathf.Max(0, playerFuel - 12f);
 
             ClearTrajectory();
             ShowTrajectory();
-
             Toast(direction > 0 ? "Moved right" : "Moved left");
         }
 
@@ -519,10 +620,18 @@ namespace TrajectoryTitans
                 float spread = count == 1 ? 0 : (i - (count - 1) * .5f) * 5f;
                 float a = (source.angle + spread) * Mathf.Deg2Rad;
                 float dir = fromEnemy ? -1 : 1;
-                float scale = .24f;
+                float scale = 0.24f;
                 Vector2 vel = new Vector2(Mathf.Cos(a) * power * scale * dir, Mathf.Sin(a) * power * scale);
-                var obj = CreateCircle("Projectile", source.muzzle.position, w.heavy ? .22f : .14f, w.color, 10);
-                projectiles.Add(new ProjectileSim { visual = obj, position = source.muzzle.position, velocity = vel, weapon = w, enemy = fromEnemy });
+                var obj = CreateCircle("Projectile", source.muzzle.position, w.heavy ? 0.2f : 0.13f, w.color, 12);
+                projectiles.Add(new ProjectileSim
+                {
+                    visual = obj,
+                    position = source.muzzle.position,
+                    velocity = vel,
+                    weapon = w,
+                    enemy = fromEnemy,
+                    trailTimer = 0
+                });
             }
             ClearTrajectory();
         }
@@ -534,9 +643,20 @@ namespace TrajectoryTitans
                 var p = projectiles[i];
                 float dt = Time.deltaTime;
                 p.life += dt;
-                p.velocity += new Vector2(wind * .16f, -9.81f) * dt;
+                p.velocity += new Vector2(wind * 0.16f, -9.81f) * dt;
                 p.position += p.velocity * dt;
                 p.visual.transform.position = p.position;
+
+                // Trail particles
+                p.trailTimer -= dt;
+                if (p.trailTimer <= 0)
+                {
+                    p.trailTimer = 0.04f;
+                    var trail = CreateCircle("Trail", p.position, UnityEngine.Random.Range(0.05f, 0.1f),
+                        new Color(p.weapon.color.r, p.weapon.color.g, p.weapon.color.b, 0.55f), 9);
+                    Destroy(trail, 0.28f);
+                }
+
                 if (p.position.y <= TerrainHeight(p.position.x) || p.life > 10f || Mathf.Abs(p.position.x) > 15f)
                 {
                     Explode(p);
@@ -551,34 +671,49 @@ namespace TrajectoryTitans
             float impactRadius = p.weapon.radius;
             Vector2 impactPos = p.position;
 
-            cameraShake = 0.38f;
-            cameraShakeIntensity = Mathf.Clamp(impactRadius * 0.9f, 0.8f, 2.8f);
+            // Stronger camera shake
+            cameraShake = p.weapon.heavy ? 0.55f : 0.38f;
+            cameraShakeIntensity = Mathf.Clamp(impactRadius * 1.1f, 1.0f, 3.2f);
 
-            var flash = CreateCircle("ExplosionFlash", impactPos, impactRadius * 0.9f, Color.white, 15);
-            flash.GetComponent<SpriteRenderer>().color = new Color(1f, 0.95f, 0.8f, 0.9f);
-            Destroy(flash, 0.12f);
+            // Bright flash
+            var flash = CreateCircle("Flash", impactPos, impactRadius * 1.1f, Color.white, 16);
+            flash.GetComponent<SpriteRenderer>().color = new Color(1f, 0.95f, 0.75f, 0.95f);
+            Destroy(flash, 0.1f);
 
-            for (int i = 0; i < 18; i++)
+            // Core fire particles
+            for (int i = 0; i < 22; i++)
             {
-                float angle = i * 20f;
-                Vector2 offset = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad)) * UnityEngine.Random.Range(0.1f, impactRadius * 0.55f);
-                float size = UnityEngine.Random.Range(0.08f, 0.28f);
-                var core = CreateCircle("ExplosionCore", impactPos + offset, size, p.weapon.color, 12);
-                Destroy(core, UnityEngine.Random.Range(0.25f, 0.45f));
+                float ang = i * (360f / 22f) + UnityEngine.Random.Range(-8f, 8f);
+                Vector2 offset = new Vector2(Mathf.Cos(ang * Mathf.Deg2Rad), Mathf.Sin(ang * Mathf.Deg2Rad))
+                    * UnityEngine.Random.Range(0.15f, impactRadius * 0.65f);
+                float size = UnityEngine.Random.Range(0.1f, 0.32f);
+                var core = CreateCircle("Fire", impactPos + offset, size, p.weapon.color, 14);
+                Destroy(core, UnityEngine.Random.Range(0.28f, 0.5f));
             }
 
-            for (int i = 0; i < 12; i++)
+            // Secondary orange ring
+            for (int i = 0; i < 10; i++)
+            {
+                Vector2 offset = UnityEngine.Random.insideUnitCircle * impactRadius * 0.5f;
+                var spark = CreateCircle("Spark", impactPos + offset, UnityEngine.Random.Range(0.05f, 0.12f),
+                    new Color(1f, 0.6f, 0.15f), 13);
+                Destroy(spark, UnityEngine.Random.Range(0.18f, 0.35f));
+            }
+
+            // Dark smoke (lasts longer)
+            for (int i = 0; i < 8; i++)
             {
                 Vector2 offset = UnityEngine.Random.insideUnitCircle * impactRadius * 0.7f;
-                float size = UnityEngine.Random.Range(0.04f, 0.12f);
-                var debris = CreateCircle("Debris", impactPos + offset, size, Color.Lerp(p.weapon.color, Color.white, 0.3f), 11);
-                Destroy(debris, UnityEngine.Random.Range(0.15f, 0.35f));
+                var smoke = CreateCircle("Smoke", impactPos + offset + Vector2.up * 0.3f,
+                    UnityEngine.Random.Range(0.25f, 0.5f), new Color(0.15f, 0.15f, 0.18f, 0.7f), 8);
+                Destroy(smoke, UnityEngine.Random.Range(0.7f, 1.3f));
             }
 
+            // Heavy weapon shockwave
             if (p.weapon.heavy)
             {
-                var ring = CreateCircle("Shockwave", impactPos, impactRadius * 1.1f, new Color(1f, 0.6f, 0.2f, 0.6f), 9);
-                Destroy(ring, 0.22f);
+                var ring = CreateCircle("Shock", impactPos, impactRadius * 1.3f, new Color(1f, 0.55f, 0.15f, 0.55f), 10);
+                Destroy(ring, 0.25f);
             }
 
             DeformTerrain(impactPos, impactRadius);
@@ -595,41 +730,42 @@ namespace TrajectoryTitans
                     playerTurn = true;
                     playerFuel = maxFuelPerTurn;
                     turnNumber++;
-                    wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-.6f,.6f), -2.8f, 2.8f);
+                    wind = Mathf.Clamp(wind + UnityEngine.Random.Range(-0.6f, 0.6f), -2.8f, 2.8f);
                     Toast("Your turn");
                     ShowTrajectory();
                 }
                 else
                 {
-                    turnDelay = 1.25f;
+                    turnDelay = 1.15f;
                 }
             }
         }
 
         private void DeformTerrain(Vector2 impact, float radius)
         {
-            float deformRadius = radius * 1.6f;
-            float maxDrop = Mathf.Clamp(radius * 0.85f, 0.6f, 2.2f);
+            float deformRadius = radius * 1.7f;
+            float maxDrop = Mathf.Clamp(radius * 0.9f, 0.65f, 2.4f);
 
             for (int i = worldObjects.Count - 1; i >= 0; i--)
             {
                 var go = worldObjects[i];
                 if (go == null) continue;
 
-                bool isTerrain = go.name.StartsWith("Terrain") || go.name.StartsWith("Grass");
+                string n = go.name;
+                bool isTerrain = n.StartsWith("Terrain") || n.StartsWith("Grass") || n.StartsWith("Soil");
                 if (!isTerrain) continue;
 
                 float dist = Vector2.Distance(new Vector2(go.transform.position.x, go.transform.position.y), impact);
                 if (dist > deformRadius) continue;
 
                 float dropAmount = maxDrop * (1f - Mathf.Clamp01(dist / deformRadius));
-                dropAmount = Mathf.Max(dropAmount, 0.25f);
+                dropAmount = Mathf.Max(dropAmount, 0.28f);
 
                 Vector3 pos = go.transform.position;
                 pos.y -= dropAmount;
                 go.transform.position = pos;
 
-                if (go.name.StartsWith("Grass") && dist < radius * 0.7f)
+                if ((n.StartsWith("Grass") || n.StartsWith("Soil")) && dist < radius * 0.75f)
                 {
                     Destroy(go);
                     worldObjects.RemoveAt(i);
@@ -641,12 +777,24 @@ namespace TrajectoryTitans
         {
             if (!allowed || target == null) return;
             float dist = Vector2.Distance(new Vector2(target.x, target.y), impact);
-            if (dist > w.radius + .9f) return;
-            float factor = 1f - Mathf.Clamp01(dist / (w.radius + 1f)) * .55f;
-            float levelBonus = target.enemy ? 1f : 1f + (save.weaponLevels[weaponIndex]-1) * .05f;
+            if (dist > w.radius + 0.95f) return;
+
+            float factor = 1f - Mathf.Clamp01(dist / (w.radius + 1f)) * 0.55f;
+            float levelBonus = target.enemy ? 1f : 1f + (save.weaponLevels[weaponIndex] - 1) * 0.05f;
             float dmg = w.damage * factor * levelBonus * (1f - target.armor);
-            if (target.shieldTurns > 0) { dmg *= .5f; target.shieldTurns--; }
+            if (target.shieldTurns > 0) { dmg *= 0.5f; target.shieldTurns--; }
+
             target.health = Mathf.Max(0, target.health - dmg);
+
+            // Floating damage number
+            floatTexts.Add(new FloatText
+            {
+                pos = new Vector2(target.x, target.y + 1.2f),
+                text = Mathf.RoundToInt(dmg).ToString(),
+                life = 1.1f,
+                color = target.enemy ? new Color(1f, 0.4f, 0.25f) : new Color(1f, 0.85f, 0.3f)
+            });
+
             Toast(Mathf.RoundToInt(dmg) + " damage!");
         }
 
@@ -654,13 +802,24 @@ namespace TrajectoryTitans
         {
             if (enemy.health <= 0)
             {
-                battleEnded = true; save.wins++; save.coins += mode == BattleMode.Campaign ? 180 + campaignStage * 20 : 100; save.xp += 80;
+                battleEnded = true;
+                save.wins++;
+                save.coins += mode == BattleMode.Campaign ? 180 + campaignStage * 20 : 100;
+                save.xp += 80;
                 if (mode == BattleMode.Campaign) campaignStage++;
-                LevelCheck(); Save(); Invoke(nameof(WinResult), 1.2f);
+                LevelCheck();
+                Save();
+                Invoke(nameof(WinResult), 1.3f);
             }
             else if (player.health <= 0)
             {
-                battleEnded = true; save.losses++; save.coins += 20; save.xp += 15; LevelCheck(); Save(); Invoke(nameof(LoseResult), 1.2f);
+                battleEnded = true;
+                save.losses++;
+                save.coins += 20;
+                save.xp += 15;
+                LevelCheck();
+                Save();
+                Invoke(nameof(LoseResult), 1.3f);
             }
         }
 
@@ -671,31 +830,39 @@ namespace TrajectoryTitans
         {
             DrawBackdrop();
             bool won = message == "VICTORY";
-            GUI.Label(new Rect(0, Screen.height*.12f, Screen.width, 100), message, titleStyle);
-            GUI.Label(new Rect(Screen.width*.25f, Screen.height*.3f, Screen.width*.5f, 120), won ? "Excellent shot command. Rewards have been added to your account." : "Study the wind, adjust power, and return stronger.", centerStyle);
-            GUI.Label(new Rect(Screen.width*.25f, Screen.height*.46f, Screen.width*.5f, 60), "Coins: " + save.coins + "     Level: " + save.level + "     XP: " + save.xp, centerStyle);
-            if (BigButton(new Rect(Screen.width*.32f, Screen.height*.62f, Screen.width*.17f, 70), "REMATCH")) StartBattle();
-            if (BigButton(new Rect(Screen.width*.51f, Screen.height*.62f, Screen.width*.17f, 70), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
+            GUI.Label(new Rect(0, Screen.height * .12f, Screen.width, 90), message, titleStyle);
+            GUI.Label(new Rect(Screen.width * .22f, Screen.height * .3f, Screen.width * .56f, 110),
+                won ? "Excellent shot command. Rewards added to your account." : "Study the wind, adjust power, and return stronger.", centerStyle);
+            GUI.Label(new Rect(Screen.width * .22f, Screen.height * .46f, Screen.width * .56f, 50),
+                "Coins: " + save.coins + "     Level: " + save.level + "     XP: " + save.xp, centerStyle);
+            if (BigButton(new Rect(Screen.width * .3f, Screen.height * .62f, Screen.width * .18f, 65), "REMATCH")) StartBattle();
+            if (BigButton(new Rect(Screen.width * .52f, Screen.height * .62f, Screen.width * .18f, 65), "MAIN MENU")) { ClearWorld(); screen = ScreenState.Menu; }
         }
 
         private void LevelCheck()
         {
             int needed = save.level * 150;
-            while (save.xp >= needed) { save.xp -= needed; save.level++; save.gems += 5; needed = save.level * 150; }
+            while (save.xp >= needed)
+            {
+                save.xp -= needed;
+                save.level++;
+                save.gems += 5;
+                needed = save.level * 150;
+            }
         }
 
         private void UpdateTankTurrets()
         {
-            if (player != null) player.turret.localRotation = Quaternion.Euler(0,0,aimAngle);
-            if (enemy != null) enemy.turret.localRotation = Quaternion.Euler(0,0,180f-enemy.angle);
+            if (player != null) player.turret.localRotation = Quaternion.Euler(0, 0, aimAngle);
+            if (enemy != null) enemy.turret.localRotation = Quaternion.Euler(0, 0, 180f - enemy.angle);
         }
 
         private void ShowTrajectory()
         {
             if (!save.trajectory || !playerTurn || player == null) return;
-            for (int i = 1; i <= 20; i++)
+            for (int i = 1; i <= 22; i++)
             {
-                var dot = CreateCircle("TrajectoryDot", Vector2.zero, .055f, new Color(1,1,1,.65f), 8);
+                var dot = CreateCircle("TrajectoryDot", Vector2.zero, 0.05f, new Color(1f, 1f, 1f, 0.6f), 7);
                 trajectoryDots.Add(dot);
             }
         }
@@ -706,11 +873,11 @@ namespace TrajectoryTitans
             if (trajectoryDots.Count == 0) ShowTrajectory();
             float a = aimAngle * Mathf.Deg2Rad;
             Vector2 start = player.muzzle.position;
-            Vector2 vel = new Vector2(Mathf.Cos(a)*shotPower*.24f, Mathf.Sin(a)*shotPower*.24f);
+            Vector2 vel = new Vector2(Mathf.Cos(a) * shotPower * 0.24f, Mathf.Sin(a) * shotPower * 0.24f);
             for (int i = 0; i < trajectoryDots.Count; i++)
             {
-                float t = (i+1)*.12f;
-                Vector2 pos = start + vel*t + .5f*new Vector2(wind*.16f,-9.81f)*t*t;
+                float t = (i + 1) * 0.11f;
+                Vector2 pos = start + vel * t + 0.5f * new Vector2(wind * 0.16f, -9.81f) * t * t;
                 trajectoryDots[i].transform.position = pos;
                 trajectoryDots[i].SetActive(pos.y > TerrainHeight(pos.x));
             }
@@ -718,7 +885,8 @@ namespace TrajectoryTitans
 
         private float TerrainHeight(float x)
         {
-            float wave = Mathf.Sin((x + mapSeed * .001f) * .42f) * .75f + Mathf.Sin((x - mapSeed * .002f) * .19f) * .52f;
+            float wave = Mathf.Sin((x + mapSeed * 0.001f) * 0.42f) * 0.75f +
+                         Mathf.Sin((x - mapSeed * 0.002f) * 0.19f) * 0.52f;
             return -1.5f + wave;
         }
 
@@ -731,31 +899,64 @@ namespace TrajectoryTitans
         private void ClearWorld()
         {
             foreach (var o in worldObjects) if (o) Destroy(o);
-            worldObjects.Clear(); projectiles.Clear(); trajectoryDots.Clear(); player = null; enemy = null;
+            worldObjects.Clear();
+            projectiles.Clear();
+            trajectoryDots.Clear();
+            floatTexts.Clear();
+            player = null;
+            enemy = null;
         }
 
         private GameObject CreateRect(string n, Vector2 pos, Vector2 size, Color color, int order)
         {
-            var go = new GameObject(n); Track(go); go.transform.position = pos; go.transform.localScale = new Vector3(size.x,size.y,1);
-            var sr = go.AddComponent<SpriteRenderer>(); sr.sprite = MakeSprite(false); sr.color = color; sr.sortingOrder = order; return go;
+            var go = new GameObject(n);
+            Track(go);
+            go.transform.position = pos;
+            go.transform.localScale = new Vector3(size.x, size.y, 1);
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = MakeSprite(false);
+            sr.color = color;
+            sr.sortingOrder = order;
+            return go;
         }
 
         private GameObject CreateCircle(string n, Vector2 pos, float radius, Color color, int order)
         {
-            var go = new GameObject(n); Track(go); go.transform.position = pos; go.transform.localScale = Vector3.one * radius * 2;
-            var sr = go.AddComponent<SpriteRenderer>(); sr.sprite = MakeSprite(true); sr.color = color; sr.sortingOrder = order; return go;
+            var go = new GameObject(n);
+            Track(go);
+            go.transform.position = pos;
+            go.transform.localScale = Vector3.one * radius * 2;
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = MakeSprite(true);
+            sr.color = color;
+            sr.sortingOrder = order;
+            return go;
         }
 
         private GameObject CreateChildRect(Transform parent, string n, Vector2 pos, Vector2 size, Color color, int order)
         {
-            var go = new GameObject(n); go.transform.SetParent(parent); go.transform.localPosition = pos; go.transform.localScale = new Vector3(size.x,size.y,1);
-            var sr = go.AddComponent<SpriteRenderer>(); sr.sprite = MakeSprite(false); sr.color = color; sr.sortingOrder = order; return go;
+            var go = new GameObject(n);
+            go.transform.SetParent(parent);
+            go.transform.localPosition = pos;
+            go.transform.localScale = new Vector3(size.x, size.y, 1);
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = MakeSprite(false);
+            sr.color = color;
+            sr.sortingOrder = order;
+            return go;
         }
 
         private GameObject CreateChildCircle(Transform parent, string n, Vector2 pos, float radius, Color color, int order)
         {
-            var go = new GameObject(n); go.transform.SetParent(parent); go.transform.localPosition = pos; go.transform.localScale = Vector3.one * radius * 2;
-            var sr = go.AddComponent<SpriteRenderer>(); sr.sprite = MakeSprite(true); sr.color = color; sr.sortingOrder = order; return go;
+            var go = new GameObject(n);
+            go.transform.SetParent(parent);
+            go.transform.localPosition = pos;
+            go.transform.localScale = Vector3.one * radius * 2;
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = MakeSprite(true);
+            sr.color = color;
+            sr.sortingOrder = order;
+            return go;
         }
 
         private Sprite squareSprite, circleSprite;
@@ -763,48 +964,68 @@ namespace TrajectoryTitans
         {
             if (!circle && squareSprite != null) return squareSprite;
             if (circle && circleSprite != null) return circleSprite;
-            int s = 64; var tex = new Texture2D(s,s,TextureFormat.RGBA32,false); tex.filterMode = FilterMode.Bilinear;
-            for (int y=0;y<s;y++) for(int x=0;x<s;x++)
+            int s = 64;
+            var tex = new Texture2D(s, s, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+            for (int y = 0; y < s; y++)
+            for (int x = 0; x < s; x++)
             {
-                bool inside = !circle || Vector2.Distance(new Vector2(x,y),new Vector2(31.5f,31.5f)) <= 31.2f;
-                tex.SetPixel(x,y,inside?Color.white:Color.clear);
+                bool inside = !circle || Vector2.Distance(new Vector2(x, y), new Vector2(31.5f, 31.5f)) <= 31.2f;
+                tex.SetPixel(x, y, inside ? Color.white : Color.clear);
             }
-            tex.Apply(); var sp = Sprite.Create(tex,new Rect(0,0,s,s),new Vector2(.5f,.5f),64);
-            if(circle) circleSprite=sp; else squareSprite=sp; return sp;
+            tex.Apply();
+            var sp = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 64);
+            if (circle) circleSprite = sp; else squareSprite = sp;
+            return sp;
         }
 
         private void Track(GameObject go) { worldObjects.Add(go); }
-        private void AddLog(string s) { combatLog.Insert(0,s); if(combatLog.Count>8) combatLog.RemoveAt(8); }
-        private void Toast(string s) { message=s; messageTimer=1.8f; }
+        private void AddLog(string s) { combatLog.Insert(0, s); if (combatLog.Count > 8) combatLog.RemoveAt(8); }
+        private void Toast(string s) { message = s; messageTimer = 1.7f; }
 
         private void DrawToast(string s)
         {
-            float w=Screen.width*.36f; Box(new Rect((Screen.width-w)/2,Screen.height*.1f,w,48),new Color(.02f,.03f,.07f,.92f));
-            GUI.Label(new Rect((Screen.width-w)/2+10,Screen.height*.1f+5,w-20,38),s,centerStyle);
+            float w = Screen.width * .38f;
+            Box(new Rect((Screen.width - w) / 2, Screen.height * .09f, w, 46), new Color(.03f, .04f, .08f, .93f));
+            GUI.Label(new Rect((Screen.width - w) / 2 + 8, Screen.height * .09f + 5, w - 16, 36), s, centerStyle);
         }
 
-        private bool BackButton() { return GUI.Button(new Rect(18,Screen.height-62,150,45),"< BACK",buttonStyle); }
-        private bool BigButton(Rect r,string text)
+        private bool BackButton() { return GUI.Button(new Rect(16, Screen.height - 58, 140, 42), "< BACK", buttonStyle); }
+
+        private bool BigButton(Rect r, string text)
         {
-            GUI.color = new Color(.16f,.42f,.72f,1); GUI.DrawTexture(r,white); GUI.color=Color.white;
-            return GUI.Button(r,text,buttonStyle);
+            GUI.color = new Color(.15f, .4f, .7f, 1);
+            GUI.DrawTexture(r, white);
+            GUI.color = Color.white;
+            return GUI.Button(r, text, buttonStyle);
         }
-        private void Box(Rect r,Color c) { GUI.color=c; GUI.DrawTexture(r,white); GUI.color=Color.white; }
-        private void DrawHealth(Rect r,float p,Color c)
+
+        private void Box(Rect r, Color c)
         {
-            Box(r,new Color(.12f,.12f,.15f,1)); Rect f=r; f.width*=Mathf.Clamp01(p); Box(f,c);
+            GUI.color = c;
+            GUI.DrawTexture(r, white);
+            GUI.color = Color.white;
+        }
+
+        private void DrawHealth(Rect r, float p, Color c)
+        {
+            Box(r, new Color(.12f, .12f, .16f, 1));
+            Rect f = r;
+            f.width *= Mathf.Clamp01(p);
+            Box(f, c);
         }
 
         private void Load()
         {
-            string json=PlayerPrefs.GetString("TT_SAVE","");
-            save=string.IsNullOrEmpty(json)?new SaveData():JsonUtility.FromJson<SaveData>(json);
-            if(save==null) save=new SaveData();
-            if(save.tankLevels==null||save.tankLevels.Length!=4) save.tankLevels=new int[4]{1,1,1,1};
-            if(save.weaponLevels==null||save.weaponLevels.Length!=8) save.weaponLevels=new int[8]{1,1,1,1,1,1,1,1};
+            string json = PlayerPrefs.GetString("TT_SAVE", "");
+            save = string.IsNullOrEmpty(json) ? new SaveData() : JsonUtility.FromJson<SaveData>(json);
+            if (save == null) save = new SaveData();
+            if (save.tankLevels == null || save.tankLevels.Length != 4) save.tankLevels = new int[4] { 1, 1, 1, 1 };
+            if (save.weaponLevels == null || save.weaponLevels.Length != 8) save.weaponLevels = new int[8] { 1, 1, 1, 1, 1, 1, 1, 1 };
         }
-        private void Save() { PlayerPrefs.SetString("TT_SAVE",JsonUtility.ToJson(save)); PlayerPrefs.Save(); }
-        private void OnApplicationPause(bool pause) { if(pause) Save(); }
+
+        private void Save() { PlayerPrefs.SetString("TT_SAVE", JsonUtility.ToJson(save)); PlayerPrefs.Save(); }
+        private void OnApplicationPause(bool pause) { if (pause) Save(); }
         private void OnApplicationQuit() { Save(); }
     }
 }
