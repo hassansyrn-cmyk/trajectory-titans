@@ -7,7 +7,7 @@ namespace TrajectoryTitans
     public enum ScreenState { Menu, Garage, Daily, Settings, Battle, Result }
     public enum BattleMode { Campaign, QuickBattle, Training }
     public enum TerrainPreset { RollingHills, CentralMountain, Valley, SteppedCanyon, RockyCover, CraterField, AsymmetricHighground, RidgeBridge }
-    public enum WeaponId { StandardShell, HeavyShell, ClusterBurst, TripleShot, BunkerBreaker, MortarArc, RicochetRound, Airburst, SmokeRound, MineDrop }
+    public enum WeaponId { StandardShell, HeavyShell, ClusterBurst, TripleShot, BunkerBreaker, MortarArc, RicochetRound, Airburst, SmokeRound, MineDrop, FireWeapon, Rocket, IceWeapon, PlasmaWeapon, LaserWeapon }
     public enum TankId { Scout, Balanced, Heavy, Artillery, Siege }
 
     [Serializable]
@@ -22,7 +22,7 @@ namespace TrajectoryTitans
         public int selectedTank = 0;
         public int selectedWeapon = 0;
         public int[] tankLevels = new int[5] { 1, 1, 1, 1, 1 };
-        public int[] weaponLevels = new int[10] { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        public int[] weaponLevels = new int[15] { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
         public string lastDaily = "";
         public bool sound = true;
         public bool vibration = true;
@@ -30,6 +30,7 @@ namespace TrajectoryTitans
         public float musicVolume = 0.7f;
         public float sfxVolume = 0.8f;
         public bool reducedMotion = false; // Accessibility feature
+        public int graphicsQuality = 1; // 0 = Low, 1 = Medium, 2 = High
     }
 
     public static class GameConfig
@@ -87,6 +88,8 @@ namespace TrajectoryTitans
         public GameObject root;
         public Transform turret;
         public Transform muzzle;
+        public Transform barrel;
+        public float recoilOffset;
         public Transform[] wheels;
         public float health;
         public float maxHealth;
@@ -172,7 +175,10 @@ namespace TrajectoryTitans
         private readonly List<DropActor> activeDrops = new List<DropActor>();
         private readonly List<ParticleSim> activeParticles = new List<ParticleSim>();
         private TankActor player, enemy;
+        private GameObject terrainMeshGo;
+        private Mesh terrainMesh;
         private bool playerTurn = true;
+        private bool isWeaponDrawerOpen = false;
         private bool battleEnded;
         private float turnDelay;
         private float aimAngle = 45f;
@@ -235,7 +241,12 @@ namespace TrajectoryTitans
             new WeaponData(WeaponId.RicochetRound, "Ricochet Round", "Bounces once on the terrain before detonating on next impact.", 32, 1.6f, 1, new Color(0.15f, 0.85f, 0.45f), 5, 1.0f, 1.0f, "Trickshot Bounce"),
             new WeaponData(WeaponId.Airburst, "Airburst Shell", "Automatically detonates exactly 1.4 seconds after firing.", 26, 2.5f, 1, new Color(1f, 0.9f, 0.25f), 6, 0.85f, 1.3f, "Mid-Air Detonation"),
             new WeaponData(WeaponId.SmokeRound, "Smoke Round", "Inflicts minimal damage but creates dense, defensive cover.", 3, 3.2f, 1, new Color(0.7f, 0.72f, 0.78f), 4, 0.9f, 1.5f, "Defensive Smoke"),
-            new WeaponData(WeaponId.MineDrop, "Mine Dispenser", "Deploys a visible, persistent surface proximity hazard.", 15, 1.8f, 1, new Color(0.88f, 0.78f, 0.1f), 3, 1.1f, 1.0f, "Area Denial")
+            new WeaponData(WeaponId.MineDrop, "Mine Dispenser", "Deploys a visible, persistent surface proximity hazard.", 15, 1.8f, 1, new Color(0.88f, 0.78f, 0.1f), 3, 1.1f, 1.0f, "Area Denial"),
+            new WeaponData(WeaponId.FireWeapon, "Fire Shot", "Incendiary projectile leaving flame trails and scorching the soil.", 30, 2.2f, 1, new Color(1.0f, 0.4f, 0.0f), 8, 0.9f, 0.8f, "Elemental Incendiary"),
+            new WeaponData(WeaponId.Rocket, "Rocket Strike", "Self-propelled missile with a steady smoke and flame exhaust trail.", 34, 1.8f, 1, new Color(1.0f, 0.6f, 0.1f), 6, 0.7f, 1.2f, "High Velocity"),
+            new WeaponData(WeaponId.IceWeapon, "Cryo Capsule", "Crystalline projectile leaving frost trails and ice shard debris.", 25, 1.6f, 1, new Color(0.2f, 0.8f, 1.0f), 8, 1.0f, 1.0f, "Elemental Frost"),
+            new WeaponData(WeaponId.PlasmaWeapon, "Plasma Bolt", "Animated violet electrical core that detonates into a plasma splash.", 36, 2.6f, 1, new Color(0.6f, 0.2f, 0.9f), 5, 0.8f, 1.1f, "Annihilation Core"),
+            new WeaponData(WeaponId.LaserWeapon, "Laser Cannon", "Fires a charged, layered beam directly across its path with direct impact.", 40, 0.3f, 1, new Color(1.0f, 0.1f, 0.4f), 4, 0.0f, 0.0f, "Precision Beam")
         };
 
         private readonly TankData[] tanks = new TankData[]
@@ -352,6 +363,10 @@ namespace TrajectoryTitans
             // Update Slope Alignments
             UpdateTankSlopeAlignments();
 
+            // Update Recoil barrel positions
+            UpdateRecoil(player);
+            UpdateRecoil(enemy);
+
             // Update Trajectory dots
             UpdateTrajectory();
 
@@ -363,6 +378,74 @@ namespace TrajectoryTitans
                 turnDelay -= Time.deltaTime;
                 if (turnDelay <= 0) EnemyThinkAndShoot();
             }
+        }
+
+        private readonly List<GameObject> particlePool = new List<GameObject>();
+
+        private GameObject GetOrCreateParticleGo(Vector2 pos, float radius, Color startColor)
+        {
+            for (int i = 0; i < particlePool.Count; i++)
+            {
+                var go = particlePool[i];
+                if (go != null && !go.activeSelf)
+                {
+                    go.transform.position = pos;
+                    go.transform.localScale = Vector3.one * radius * 2f;
+                    var sr = go.GetComponent<SpriteRenderer>();
+                    if (sr != null)
+                    {
+                        sr.color = startColor;
+                        sr.enabled = true;
+                    }
+                    go.SetActive(true);
+                    return go;
+                }
+            }
+
+            int budget = 60;
+            if (save != null)
+            {
+                if (save.graphicsQuality == 0) budget = 30; // Low (50%)
+                else if (save.graphicsQuality == 2) budget = 90; // High (150%)
+            }
+
+            if (particlePool.Count < budget)
+            {
+                var go = CreateCircleGameObject("PooledParticle", pos, radius, startColor, 13);
+                particlePool.Add(go);
+                return go;
+            }
+
+            if (activeParticles.Count > 0)
+            {
+                var oldest = activeParticles[0];
+                activeParticles.RemoveAt(0);
+                var go = oldest.visual;
+                if (go != null)
+                {
+                    go.transform.position = pos;
+                    go.transform.localScale = Vector3.one * radius * 2f;
+                    var sr = go.GetComponent<SpriteRenderer>();
+                    if (sr != null)
+                    {
+                        sr.color = startColor;
+                        sr.enabled = true;
+                    }
+                    go.SetActive(true);
+                    return go;
+                }
+            }
+
+            return CreateCircleGameObject("PooledParticle", pos, radius, startColor, 13);
+        }
+
+        private void ClearParticlePool()
+        {
+            foreach (var go in particlePool)
+            {
+                if (go != null) Destroy(go);
+            }
+            particlePool.Clear();
         }
 
         private void UpdateParticles()
@@ -380,7 +463,7 @@ namespace TrajectoryTitans
 
                 if (p.life <= 0)
                 {
-                    Destroy(p.visual);
+                    p.visual.SetActive(false);
                     activeParticles.RemoveAt(i);
                 }
             }
@@ -388,9 +471,7 @@ namespace TrajectoryTitans
 
         private void SpawnParticle(Vector2 position, Vector2 velocity, Color start, Color end, float radius, float duration)
         {
-            // Performance Cap
-            if (activeParticles.Count > 120) return;
-            var go = CreateCircleGameObject("Particle", position, radius, start, 13);
+            var go = GetOrCreateParticleGo(position, radius, start);
             activeParticles.Add(new ParticleSim
             {
                 visual = go,
@@ -490,6 +571,7 @@ namespace TrajectoryTitans
                         // Check Aiming dragging zone (right portion of screen, avoiding FIRE and selector)
                         else if (screenPos.x > Screen.width * 0.45f && touchYGUI < Screen.height * 0.72f)
                         {
+                            if (isWeaponDrawerOpen) continue;
                             aimFingerId = t.fingerId;
                             aimStart = screenPos;
                             aimCurrent = screenPos;
@@ -541,6 +623,7 @@ namespace TrajectoryTitans
                     }
                     else if (mPos.x > Screen.width * 0.45f && mYGUI < Screen.height * 0.72f)
                     {
+                        if (isWeaponDrawerOpen) return;
                         aimStart = mPos;
                         aimCurrent = mPos;
                         isAimingDragging = true;
@@ -758,11 +841,18 @@ namespace TrajectoryTitans
             save.trajectory = GUI.Toggle(new Rect(x, y + 110, w, 40), save.trajectory, "  Enable Trajectory Preview", bodyStyle);
             save.reducedMotion = GUI.Toggle(new Rect(x, y + 165, w, 40), save.reducedMotion, "  Reduced Motion (Mute Camera Shake)", bodyStyle);
 
-            GUI.Label(new Rect(x, y + 230, 220, 36), "Music Soundtrack", bodyStyle);
-            save.musicVolume = GUI.HorizontalSlider(new Rect(x + 230, y + 242, w - 240, 24), save.musicVolume, 0, 1);
+            GUI.Label(new Rect(x, y + 225, 220, 36), "Graphics Quality", bodyStyle);
+            string qText = save.graphicsQuality == 0 ? "LOW" : (save.graphicsQuality == 2 ? "HIGH" : "MEDIUM");
+            if (GUI.Button(new Rect(x + 230, y + 225, 160, 30), "QUALITY: " + qText, buttonStyle))
+            {
+                save.graphicsQuality = (save.graphicsQuality + 1) % 3;
+            }
 
-            GUI.Label(new Rect(x, y + 285, 220, 36), "Weapons Sound FX", bodyStyle);
-            save.sfxVolume = GUI.HorizontalSlider(new Rect(x + 230, y + 297, w - 240, 24), save.sfxVolume, 0, 1);
+            GUI.Label(new Rect(x, y + 275, 220, 36), "Music Soundtrack", bodyStyle);
+            save.musicVolume = GUI.HorizontalSlider(new Rect(x + 230, y + 287, w - 240, 24), save.musicVolume, 0, 1);
+
+            GUI.Label(new Rect(x, y + 325, 220, 36), "Weapons Sound FX", bodyStyle);
+            save.sfxVolume = GUI.HorizontalSlider(new Rect(x + 230, y + 337, w - 240, 24), save.sfxVolume, 0, 1);
         }
 
         private void StartBattle()
@@ -931,31 +1021,86 @@ namespace TrajectoryTitans
 
         private void RenderTerrainBlocks()
         {
-            // Clean up old terrain blocks first
-            for (int i = worldObjects.Count - 1; i >= 0; i--)
+            RenderTerrainMesh();
+        }
+
+        private void RenderTerrainMesh()
+        {
+            if (terrainHeights == null || terrainPointsCount == 0) return;
+
+            if (terrainMeshGo == null)
             {
-                if (worldObjects[i] != null && worldObjects[i].name.StartsWith("TerrBlock"))
-                {
-                    Destroy(worldObjects[i]);
-                    worldObjects.RemoveAt(i);
-                }
+                terrainMeshGo = new GameObject("SmoothTerrainMesh");
+                TrackGameObject(terrainMeshGo);
+                var filter = terrainMeshGo.AddComponent<MeshFilter>();
+                var renderer = terrainMeshGo.AddComponent<MeshRenderer>();
+
+                var shader = Shader.Find("Sprites/Default");
+                if (shader == null) shader = Shader.Find("UI/Default");
+                renderer.material = new Material(shader);
+
+                terrainMesh = new Mesh();
+                filter.mesh = terrainMesh;
             }
 
-            // Draw clean vertical slices
-            for (int i = 0; i < terrainPointsCount; i++)
+            int numPoints = terrainPointsCount;
+            Vector3[] vertices = new Vector3[numPoints * 3];
+            Color[] colors = new Color[numPoints * 3];
+            int[] triangles = new int[(numPoints - 1) * 12]; // 4 triangles (12 indices) per segment
+
+            Color grassColor = new Color(0.26f, 0.65f, 0.22f);
+            Color dirtColor = new Color(0.28f, 0.18f, 0.12f);
+            Color stoneColor = new Color(0.12f, 0.08f, 0.06f);
+
+            for (int i = 0; i < numPoints; i++)
             {
                 float x = TerrainStart + i * TerrainStep;
                 float y = terrainHeights[i];
 
-                Color dirtColor = new Color(0.24f, 0.16f, 0.11f);
-                Color grassColor = new Color(0.26f, 0.65f, 0.22f);
+                vertices[i * 3 + 0] = new Vector3(x, y, 0);                 // Top Grass surface
+                vertices[i * 3 + 1] = new Vector3(x, y - 0.18f, 0);         // Subsurface dirt transition
+                vertices[i * 3 + 2] = new Vector3(x, -5.0f, 0);             // Bottom dark stone boundary
 
-                // Deep ground block
-                var terrBlock = CreateRectGameObject("TerrBlock", new Vector2(x, y - 4f), new Vector2(TerrainStep + 0.02f, 8f), dirtColor, -2);
-
-                // Beautiful green cap to represent lush surface
-                var capBlock = CreateChildRect(terrBlock.transform, "Cap", new Vector2(0f, 0.5f), new Vector2(1f, 0.05f), grassColor, -1);
+                colors[i * 3 + 0] = grassColor;
+                colors[i * 3 + 1] = dirtColor;
+                colors[i * 3 + 2] = stoneColor;
             }
+
+            int triIndex = 0;
+            for (int i = 0; i < numPoints - 1; i++)
+            {
+                int currTop = i * 3 + 0;
+                int currMid = i * 3 + 1;
+                int currBot = i * 3 + 2;
+
+                int nextTop = (i + 1) * 3 + 0;
+                int nextMid = (i + 1) * 3 + 1;
+                int nextBot = (i + 1) * 3 + 2;
+
+                // Triangles for Grass Strip (top to mid)
+                triangles[triIndex++] = currTop;
+                triangles[triIndex++] = nextTop;
+                triangles[triIndex++] = currMid;
+
+                triangles[triIndex++] = currMid;
+                triangles[triIndex++] = nextTop;
+                triangles[triIndex++] = nextMid;
+
+                // Triangles for Subsurface Earth (mid to bot)
+                triangles[triIndex++] = currMid;
+                triangles[triIndex++] = nextMid;
+                triangles[triIndex++] = currBot;
+
+                triangles[triIndex++] = currBot;
+                triangles[triIndex++] = nextMid;
+                triangles[triIndex++] = nextBot;
+            }
+
+            terrainMesh.Clear();
+            terrainMesh.vertices = vertices;
+            terrainMesh.colors = colors;
+            terrainMesh.triangles = triangles;
+            terrainMesh.RecalculateBounds();
         }
 
         private TankActor CreateTank(TankData data, float startX, bool isEnemy)
@@ -978,69 +1123,119 @@ namespace TrajectoryTitans
             t.root.transform.position = new Vector3(t.x, t.y, 0);
 
             Color coreColor = data.body;
-            Color darkTone = coreColor * 0.5f;
+            Color darkTone = coreColor * 0.45f;
             Color metalGray = new Color(0.42f, 0.44f, 0.48f);
             Color highlight = Color.Lerp(coreColor, Color.white, 0.35f);
+            Color shadowColor = new Color(0.05f, 0.05f, 0.08f, 0.6f);
 
-            // Distinct Archetype Silhouettes (Phase 8)
+            // Distinct High-Fidelity Modular Tank Assemblies
             switch (data.id)
             {
                 case TankId.Scout:
-                    // Compact frame
-                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.5f), new Vector2(1.7f, 0.35f), Color.black, 1);
-                    CreateChildRect(t.root.transform, "Hull", new Vector2(0, -0.05f), new Vector2(1.4f, 0.5f), coreColor, 5);
-                    var scoutTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(-0.1f, 0.4f), 0.38f, darkTone, 8);
+                    // Compact, aerodynamic sloped front frame
+                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.5f), new Vector2(1.7f, 0.32f), Color.black, 1);
+                    CreateChildRect(t.root.transform, "BeltFront", new Vector2(-0.85f, -0.5f), new Vector2(0.12f, 0.32f), Color.black, 2);
+                    CreateChildRect(t.root.transform, "BeltBack", new Vector2(0.85f, -0.5f), new Vector2(0.12f, 0.32f), Color.black, 2);
+
+                    // Sloped upper hull
+                    CreateChildRect(t.root.transform, "HullBase", new Vector2(0, -0.1f), new Vector2(1.5f, 0.42f), coreColor, 5);
+                    CreateChildRect(t.root.transform, "SlopedArmor", new Vector2(isEnemy ? -0.3f : 0.3f, 0.02f), new Vector2(0.8f, 0.22f), highlight, 6);
+                    CreateChildRect(t.root.transform, "Vents", new Vector2(isEnemy ? 0.45f : -0.45f, -0.05f), new Vector2(0.35f, 0.08f), Color.black, 6);
+
+                    // Antenna attachment
+                    CreateChildRect(t.root.transform, "Antenna", new Vector2(isEnemy ? 0.5f : -0.5f, 0.52f), new Vector2(0.04f, 0.72f), metalGray, 4);
+
+                    // Sleek compact Turret and hatch
+                    var scoutTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(-0.08f, 0.32f), 0.38f, darkTone, 8);
                     t.turret = scoutTurret.transform;
+                    CreateChildCircle(t.turret, "Hatch", new Vector2(0f, 0.28f), 0.12f, shadowColor, 9);
                     break;
 
                 case TankId.Heavy:
-                    // Massive, wide armored silhouette
-                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.55f), new Vector2(2.5f, 0.5f), Color.black, 1);
-                    CreateChildRect(t.root.transform, "Hull", new Vector2(0, 0.12f), new Vector2(2.2f, 0.85f), coreColor, 5);
-                    CreateChildRect(t.root.transform, "ArmorShield", new Vector2(0, 0.15f), new Vector2(2.0f, 0.3f), highlight, 6);
-                    var heavyTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(0, 0.65f), 0.55f, darkTone, 8);
+                    // Massive armored multi-layered silhouette
+                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.55f), new Vector2(2.5f, 0.48f), Color.black, 1);
+                    CreateChildRect(t.root.transform, "BeltFront", new Vector2(-1.25f, -0.55f), new Vector2(0.15f, 0.48f), Color.black, 2);
+                    CreateChildRect(t.root.transform, "BeltBack", new Vector2(1.25f, -0.55f), new Vector2(0.15f, 0.48f), Color.black, 2);
+
+                    // Multi-tiered armored block hull
+                    CreateChildRect(t.root.transform, "HullBase", new Vector2(0, 0.1f), new Vector2(2.3f, 0.75f), coreColor, 5);
+                    CreateChildRect(t.root.transform, "ArmorShield1", new Vector2(-0.45f, 0.15f), new Vector2(1.0f, 0.32f), highlight, 6);
+                    CreateChildRect(t.root.transform, "ArmorShield2", new Vector2(0.45f, 0.15f), new Vector2(1.0f, 0.32f), darkTone, 6);
+                    CreateChildRect(t.root.transform, "Vents", new Vector2(isEnemy ? 0.85f : -0.85f, 0.35f), new Vector2(0.42f, 0.12f), Color.black, 6);
+
+                    // Broad robust Turret and double hatch
+                    var heavyTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(0f, 0.62f), 0.55f, darkTone, 8);
                     t.turret = heavyTurret.transform;
+                    CreateChildRect(t.turret, "HatchLeft", new Vector2(-0.16f, 0.42f), new Vector2(0.18f, 0.08f), shadowColor, 9);
+                    CreateChildRect(t.turret, "HatchRight", new Vector2(0.16f, 0.42f), new Vector2(0.18f, 0.08f), shadowColor, 9);
                     break;
 
                 case TankId.Artillery:
-                    // Slender high frame, rear mounted turret
-                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.5f), new Vector2(2.0f, 0.4f), Color.black, 1);
-                    CreateChildRect(t.root.transform, "Hull", new Vector2(0, 0.05f), new Vector2(1.8f, 0.65f), coreColor, 5);
-                    var artTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(isEnemy ? 0.3f : -0.3f, 0.58f), 0.45f, darkTone, 8);
+                    // Long frame chassis with high support struts
+                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.52f), new Vector2(2.1f, 0.38f), Color.black, 1);
+
+                    // Rear loaded launching base
+                    CreateChildRect(t.root.transform, "HullBase", new Vector2(0, 0.04f), new Vector2(1.9f, 0.62f), coreColor, 5);
+                    CreateChildRect(t.root.transform, "PistonsSupport", new Vector2(isEnemy ? 0.65f : -0.65f, 0.42f), new Vector2(0.15f, 0.55f), metalGray, 4);
+
+                    // Elevated Turret Assembly
+                    var artTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(isEnemy ? 0.3f : -0.3f, 0.55f), 0.46f, darkTone, 8);
                     t.turret = artTurret.transform;
+                    CreateChildRect(t.turret, "LensScope", new Vector2(isEnemy ? -0.2f : 0.2f, 0.25f), new Vector2(0.15f, 0.15f), Color.cyan, 9);
                     break;
 
                 case TankId.Siege:
-                    // Reinforced blocky structure
-                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.52f), new Vector2(2.3f, 0.45f), Color.black, 1);
-                    CreateChildRect(t.root.transform, "Hull", new Vector2(0, 0.08f), new Vector2(2.0f, 0.75f), coreColor, 5);
-                    var siegeTurret = CreateChildRect(t.root.transform, "Turret", new Vector2(0, 0.6f), new Vector2(1.1f, 0.7f), darkTone, 8);
+                    // Dual blocky plates with heavy-riveted armor panels
+                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.52f), new Vector2(2.4f, 0.45f), Color.black, 1);
+                    CreateChildRect(t.root.transform, "HullBase", new Vector2(0, 0.08f), new Vector2(2.1f, 0.72f), coreColor, 5);
+
+                    // Heavy layered iron siding
+                    CreateChildRect(t.root.transform, "SidingLeft", new Vector2(-0.65f, 0.08f), new Vector2(0.72f, 0.42f), darkTone, 6);
+                    CreateChildRect(t.root.transform, "SidingRight", new Vector2(0.65f, 0.08f), new Vector2(0.72f, 0.42f), highlight, 6);
+
+                    // Blocky heavy Turret with a massive bezel
+                    var siegeTurret = CreateChildRect(t.root.transform, "Turret", new Vector2(0f, 0.58f), new Vector2(1.1f, 0.66f), darkTone, 8);
                     t.turret = siegeTurret.transform;
+                    CreateChildCircle(t.turret, "HeavyHatch", new Vector2(0f, 0.28f), 0.18f, Color.black, 9);
                     break;
 
                 default: // Balanced
-                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.52f), new Vector2(2.1f, 0.42f), Color.black, 1);
-                    CreateChildRect(t.root.transform, "Hull", new Vector2(0, 0.05f), new Vector2(1.8f, 0.66f), coreColor, 5);
-                    var balTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(0, 0.52f), 0.5f, darkTone, 8);
+                    // Classic robust armored chassis
+                    CreateChildRect(t.root.transform, "TrackBase", new Vector2(0, -0.52f), new Vector2(2.1f, 0.4f), Color.black, 1);
+                    CreateChildRect(t.root.transform, "HullBase", new Vector2(0, 0.04f), new Vector2(1.8f, 0.62f), coreColor, 5);
+                    CreateChildRect(t.root.transform, "SideSkirt", new Vector2(0, -0.15f), new Vector2(1.9f, 0.12f), darkTone, 6);
+                    CreateChildRect(t.root.transform, "ExhaustVent", new Vector2(isEnemy ? 0.65f : -0.65f, 0.22f), new Vector2(0.28f, 0.15f), shadowColor, 6);
+
+                    // Circular command turret
+                    var balTurret = CreateChildCircle(t.root.transform, "Turret", new Vector2(0f, 0.5f), 0.5f, darkTone, 8);
                     t.turret = balTurret.transform;
+                    CreateChildCircle(t.turret, "CommandHatch", new Vector2(0f, 0.32f), 0.15f, shadowColor, 9);
                     break;
             }
 
-            // Standard wheels & gun components
+            // Varied wheel sizes (Sprocket wheels at ends, larger road wheels in middle)
             t.wheels = new Transform[4];
-            float[] wx = { -0.7f, -0.25f, 0.25f, 0.7f };
+            float[] wx = { -0.72f, -0.24f, 0.24f, 0.72f };
+            float[] wr = { 0.16f, 0.23f, 0.23f, 0.16f }; // drive sprockets vs road wheels
             for (int i = 0; i < 4; i++)
             {
-                var w = CreateChildCircle(t.root.transform, "Wheel" + i, new Vector2(wx[i], -0.52f), 0.22f, metalGray, 3);
+                var w = CreateChildCircle(t.root.transform, "Wheel" + i, new Vector2(wx[i], -0.52f), wr[i], metalGray, 3);
+                // Draw cool sprocket spoke details on wheels
+                CreateChildRect(w.transform, "Spoke1", Vector2.zero, new Vector2(wr[i] * 1.6f, 0.04f), Color.black, 4);
+                CreateChildRect(w.transform, "Spoke2", Vector2.zero, new Vector2(0.04f, wr[i] * 1.6f), Color.black, 4);
                 t.wheels[i] = w.transform;
             }
 
-            // Gun Barrel and Muzzle setup (Visually matched to launch position!)
+            // High-fidelity gun barrel assemblies
             float dir = isEnemy ? -1f : 1f;
             var barrelLength = data.id == TankId.Artillery ? 1.7f : (data.id == TankId.Siege ? 1.8f : 1.4f);
             var barrelWidth = data.id == TankId.Siege ? 0.28f : 0.16f;
 
-            CreateChildRect(t.turret, "Barrel", new Vector2(barrelLength * 0.5f * dir, 0), new Vector2(barrelLength, barrelWidth), new Color(0.18f, 0.2f, 0.25f), 7);
+            var barObj = CreateChildRect(t.turret, "Barrel", new Vector2(barrelLength * 0.5f * dir, 0), new Vector2(barrelLength, barrelWidth), new Color(0.18f, 0.2f, 0.25f), 7);
+            t.barrel = barObj.transform;
+
+            // Visible reinforced muzzle muzzle brake attachment
+            CreateChildRect(t.barrel, "MuzzleBrake", new Vector2(dir * 0.45f, 0f), new Vector2(0.18f, barrelWidth * 1.5f), Color.black, 8);
 
             t.muzzle = new GameObject("Muzzle").transform;
             t.muzzle.SetParent(t.turret);
@@ -1053,6 +1248,9 @@ namespace TrajectoryTitans
         {
             if (player != null && player.root != null)
             {
+                player.y = GetTerrainHeight(player.x) + 0.62f;
+                player.root.transform.position = new Vector3(player.x, player.y, 0);
+
                 float x1 = player.x - 0.45f;
                 float x2 = player.x + 0.45f;
                 float y1 = GetTerrainHeight(x1);
@@ -1066,6 +1264,9 @@ namespace TrajectoryTitans
 
             if (enemy != null && enemy.root != null)
             {
+                enemy.y = GetTerrainHeight(enemy.x) + 0.62f;
+                enemy.root.transform.position = new Vector3(enemy.x, enemy.y, 0);
+
                 float x1 = enemy.x - 0.45f;
                 float x2 = enemy.x + 0.45f;
                 float y1 = GetTerrainHeight(x1);
@@ -1076,6 +1277,15 @@ namespace TrajectoryTitans
                 // Cannon independently rotatable
                 enemy.turret.localRotation = Quaternion.Euler(0, 0, (180f - enemy.angle) - enemy.slopeAngle);
             }
+        }
+
+        private void UpdateRecoil(TankActor t)
+        {
+            if (t == null || t.barrel == null) return;
+            t.recoilOffset = Mathf.MoveTowards(t.recoilOffset, 0f, Time.deltaTime * 3.5f);
+            float dir = t.enemy ? -1f : 1f;
+            float barrelLength = t.archetype == TankId.Artillery ? 1.7f : (t.archetype == TankId.Siege ? 1.8f : 1.4f);
+            t.barrel.localPosition = new Vector3((barrelLength * 0.5f - t.recoilOffset) * dir, 0, 0);
         }
 
         private void ProcessProjectileBouncesAndMines(ProjectileSim p)
@@ -1164,14 +1374,49 @@ namespace TrajectoryTitans
                 }
                 else
                 {
-                    if (p.visual != null) p.visual.transform.position = p.position;
+                    if (p.visual != null)
+                    {
+                        p.visual.transform.position = p.position;
+                        if (p.velocity.sqrMagnitude > 0.01f)
+                        {
+                            float angle = Mathf.Atan2(p.velocity.y, p.velocity.x) * Mathf.Rad2Deg;
+                            p.visual.transform.rotation = Quaternion.Euler(0, 0, angle);
+                        }
+                    }
 
                     p.trailTimer -= dt;
                     if (p.trailTimer <= 0)
                     {
-                        p.trailTimer = 0.04f;
-                        var trail = CreateCircleGameObject("Trail", p.position, UnityEngine.Random.Range(0.06f, 0.12f), new Color(p.weapon.color.r, p.weapon.color.g, p.weapon.color.b, 0.5f), 9);
-                        Destroy(trail, 0.35f);
+                        p.trailTimer = 0.035f;
+                        Color trailCol = p.weapon.color;
+                        float trailSize = UnityEngine.Random.Range(0.06f, 0.12f);
+                        float trailDuration = 0.35f;
+
+                        if (p.weapon.id == WeaponId.Rocket || p.weapon.id == WeaponId.FireWeapon)
+                        {
+                            trailCol = Color.Lerp(Color.red, Color.yellow, UnityEngine.Random.value);
+                            trailSize = UnityEngine.Random.Range(0.08f, 0.16f);
+                            trailDuration = 0.22f;
+                        }
+                        else if (p.weapon.id == WeaponId.IceWeapon)
+                        {
+                            trailCol = new Color(0.4f, 0.9f, 1.0f, 0.6f);
+                            trailSize = UnityEngine.Random.Range(0.05f, 0.1f);
+                        }
+                        else if (p.weapon.id == WeaponId.PlasmaWeapon)
+                        {
+                            trailCol = new Color(0.7f, 0.3f, 1.0f, 0.7f);
+                            trailSize = UnityEngine.Random.Range(0.08f, 0.14f);
+                        }
+                        else if (p.weapon.id == WeaponId.LaserWeapon)
+                        {
+                            trailCol = new Color(1.0f, 0.1f, 0.4f, 0.8f);
+                            trailSize = 0.1f;
+                            trailDuration = 0.15f;
+                        }
+
+                        var trail = CreateCircleGameObject("Trail", p.position, trailSize, new Color(trailCol.r, trailCol.g, trailCol.b, 0.5f), 9);
+                        Destroy(trail, trailDuration);
                     }
                 }
             }
@@ -1218,7 +1463,7 @@ namespace TrajectoryTitans
             SpawnExplosionFlash(impactPos, r, p.weapon.color);
 
             // Deform authoritative terrain array and rerender
-            DeformTerrain(impactPos, r);
+            DeformTerrain(impactPos, p.weapon);
 
             // Mine Placement weapon logic
             if (p.weapon.id == WeaponId.MineDrop)
@@ -1292,30 +1537,100 @@ namespace TrajectoryTitans
             }
         }
 
-        private void DeformTerrain(Vector2 impact, float radius)
+        private void DeformTerrain(Vector2 impact, WeaponData w)
         {
-            if (radius <= 0.45f) return; // bunker breaker does zero deformation
-            float deformRadius = radius * 1.6f;
-            float maxDrop = radius * 0.95f;
+            if (w == null) return;
+
+            float craterWidth = w.radius * 1.5f;
+            float craterDepth = w.radius * 0.9f;
+
+            // Custom Profiles based on WeaponId
+            switch (w.id)
+            {
+                case WeaponId.StandardShell:
+                    craterWidth = w.radius * 1.6f;
+                    craterDepth = w.radius * 0.95f;
+                    break;
+                case WeaponId.HeavyShell:
+                    craterWidth = w.radius * 1.8f;
+                    craterDepth = w.radius * 1.3f;
+                    break;
+                case WeaponId.BunkerBreaker:
+                    craterWidth = w.radius * 0.8f;
+                    craterDepth = w.radius * 2.8f; // Extremely deep and narrow
+                    break;
+                case WeaponId.MortarArc:
+                    craterWidth = w.radius * 1.2f;
+                    craterDepth = w.radius * 1.4f;
+                    break;
+                case WeaponId.ClusterBurst:
+                    craterWidth = w.radius * 1.1f;
+                    craterDepth = w.radius * 0.45f; // shallow
+                    break;
+                case WeaponId.Rocket:
+                    craterWidth = w.radius * 1.5f;
+                    craterDepth = w.radius * 0.9f;
+                    break;
+                case WeaponId.FireWeapon:
+                    craterWidth = w.radius * 1.7f;
+                    craterDepth = w.radius * 0.5f; // shallow scorched
+                    break;
+                case WeaponId.IceWeapon:
+                    craterWidth = w.radius * 1.2f;
+                    craterDepth = w.radius * 0.4f; // small shallow
+                    break;
+                case WeaponId.PlasmaWeapon:
+                    craterWidth = w.radius * 2.0f;
+                    craterDepth = w.radius * 0.8f; // smooth wide
+                    break;
+                case WeaponId.LaserWeapon:
+                    craterWidth = w.radius * 0.4f;
+                    craterDepth = w.radius * 0.15f; // minimal deformation
+                    break;
+                case WeaponId.MineDrop:
+                    craterWidth = w.radius * 1.0f;
+                    craterDepth = w.radius * 0.6f;
+                    break;
+            }
+
+            if (craterWidth <= 0.05f) return;
 
             for (int i = 0; i < terrainPointsCount; i++)
             {
                 float tx = TerrainStart + i * TerrainStep;
                 float dist = Mathf.Abs(tx - impact.x);
 
-                if (dist < deformRadius)
+                if (dist < craterWidth)
                 {
-                    // Parabolic crater formula
-                    float factor = 1f - (dist / deformRadius);
-                    float drop = maxDrop * factor * factor;
+                    float factor = 1f - (dist / craterWidth);
+                    float drop = 0f;
 
-                    // Modify authoritative heights
+                    // Apply different curves for visual variety
+                    switch (w.id)
+                    {
+                        case WeaponId.BunkerBreaker:
+                        case WeaponId.LaserWeapon:
+                            // Sharp needle parabolic curve
+                            drop = craterDepth * Mathf.Pow(factor, 4f);
+                            break;
+                        case WeaponId.HeavyShell:
+                        case WeaponId.PlasmaWeapon:
+                            // Smooth semi-circular/cosine curve
+                            drop = craterDepth * Mathf.Cos((dist / craterWidth) * (Mathf.PI * 0.5f));
+                            break;
+                        default:
+                            // Rounded parabolic
+                            drop = craterDepth * factor * factor;
+                            break;
+                    }
+
                     float originalHeight = terrainHeights[i];
                     terrainHeights[i] = Mathf.Clamp(originalHeight - drop, -4.5f, 4.8f);
                 }
             }
 
             RenderTerrainBlocks();
+            UpdateTankSlopeAlignments();
         }
 
         private void DeployMine(Vector2 pos)
@@ -1566,6 +1881,7 @@ namespace TrajectoryTitans
 
         private void LaunchSequence(TankActor source, WeaponData w, float power, bool isEnemy)
         {
+            source.recoilOffset = 0.45f;
             int count = w.projectiles;
             for (int i = 0; i < count; i++)
             {
@@ -1589,7 +1905,7 @@ namespace TrajectoryTitans
 
                 // Spawns perfectly at visible barrel muzzle Brake!
                 var visualObj = CreateCircleGameObject("Projectile", source.muzzle.position, 0.16f, w.color, 12);
-                projectiles.Add(new ProjectileSim
+                var projSim = new ProjectileSim
                 {
                     visual = visualObj,
                     position = source.muzzle.position,
@@ -1597,9 +1913,98 @@ namespace TrajectoryTitans
                     weapon = w,
                     enemy = isEnemy,
                     trailTimer = 0f
-                });
+                };
+                StyleProjectileVisual(projSim);
+                projectiles.Add(projSim);
             }
             ClearTrajectory();
+        }
+
+        private void StyleProjectileVisual(ProjectileSim p)
+        {
+            if (p == null || p.visual == null) return;
+
+            var rootSr = p.visual.GetComponent<SpriteRenderer>();
+            if (rootSr != null) rootSr.enabled = false;
+
+            Color c = p.weapon.color;
+            Color shadowColor = new Color(0.05f, 0.05f, 0.08f, 0.6f);
+
+            switch (p.weapon.id)
+            {
+                case WeaponId.StandardShell:
+                    CreateChildRect(p.visual.transform, "Body", Vector2.zero, new Vector2(0.25f, 0.12f), Color.gray, 12);
+                    CreateChildCircle(p.visual.transform, "Nose", new Vector2(0.125f, 0f), 0.06f, Color.yellow, 13);
+                    CreateChildRect(p.visual.transform, "Fin", new Vector2(-0.125f, 0f), new Vector2(0.06f, 0.16f), Color.black, 11);
+                    break;
+
+                case WeaponId.HeavyShell:
+                    CreateChildRect(p.visual.transform, "Body", Vector2.zero, new Vector2(0.35f, 0.22f), Color.gray, 12);
+                    CreateChildCircle(p.visual.transform, "Nose", new Vector2(0.175f, 0f), 0.11f, Color.red, 13);
+                    CreateChildRect(p.visual.transform, "Band", new Vector2(-0.06f, 0f), new Vector2(0.06f, 0.24f), Color.yellow, 13);
+                    break;
+
+                case WeaponId.BunkerBreaker:
+                    CreateChildRect(p.visual.transform, "Body", Vector2.zero, new Vector2(0.42f, 0.08f), new Color(0.75f, 0.78f, 0.82f), 12);
+                    CreateChildCircle(p.visual.transform, "Nose", new Vector2(0.21f, 0f), 0.04f, Color.black, 13);
+                    break;
+
+                case WeaponId.Rocket:
+                    CreateChildRect(p.visual.transform, "Body", Vector2.zero, new Vector2(0.38f, 0.14f), Color.white, 12);
+                    CreateChildCircle(p.visual.transform, "Nose", new Vector2(0.19f, 0f), 0.07f, Color.red, 13);
+                    CreateChildRect(p.visual.transform, "FinL", new Vector2(-0.16f, 0.09f), new Vector2(0.08f, 0.06f), Color.red, 11);
+                    CreateChildRect(p.visual.transform, "FinR", new Vector2(-0.16f, -0.09f), new Vector2(0.08f, 0.06f), Color.red, 11);
+                    break;
+
+                case WeaponId.FireWeapon:
+                    if (rootSr != null)
+                    {
+                        rootSr.enabled = true;
+                        rootSr.color = Color.yellow;
+                    }
+                    CreateChildCircle(p.visual.transform, "OuterFlame", Vector2.zero, 0.22f, new Color(1.0f, 0.35f, 0f, 0.85f), 11);
+                    break;
+
+                case WeaponId.IceWeapon:
+                    var crystal = CreateChildRect(p.visual.transform, "Crystal", Vector2.zero, new Vector2(0.18f, 0.18f), new Color(0.4f, 0.9f, 1f, 0.9f), 12);
+                    crystal.transform.localRotation = Quaternion.Euler(0, 0, 45);
+                    CreateChildCircle(p.visual.transform, "Core", Vector2.zero, 0.06f, Color.white, 13);
+                    break;
+
+                case WeaponId.PlasmaWeapon:
+                    if (rootSr != null)
+                    {
+                        rootSr.enabled = true;
+                        rootSr.color = Color.white;
+                    }
+                    CreateChildCircle(p.visual.transform, "OuterShield", Vector2.zero, 0.26f, new Color(0.6f, 0.15f, 0.92f, 0.6f), 11);
+                    CreateChildCircle(p.visual.transform, "InnerEnergy", Vector2.zero, 0.18f, new Color(0.85f, 0.3f, 1.0f, 0.95f), 12);
+                    break;
+
+                case WeaponId.LaserWeapon:
+                    var beam = CreateChildRect(p.visual.transform, "Beam", Vector2.zero, new Vector2(1.2f, 0.15f), new Color(1.0f, 0.1f, 0.4f, 0.95f), 12);
+                    CreateChildRect(beam.transform, "Core", Vector2.zero, new Vector2(1.2f, 0.05f), Color.white, 13);
+                    break;
+
+                case WeaponId.SmokeRound:
+                    CreateChildRect(p.visual.transform, "Canister", Vector2.zero, new Vector2(0.26f, 0.14f), new Color(0.55f, 0.6f, 0.55f), 12);
+                    CreateChildCircle(p.visual.transform, "Tip", new Vector2(0.13f, 0f), 0.07f, Color.green, 13);
+                    break;
+
+                case WeaponId.MortarArc:
+                    CreateChildCircle(p.visual.transform, "Body", Vector2.zero, 0.14f, new Color(0.35f, 0.35f, 0.35f), 12);
+                    CreateChildRect(p.visual.transform, "Tail", new Vector2(-0.15f, 0f), new Vector2(0.14f, 0.08f), Color.black, 11);
+                    CreateChildRect(p.visual.transform, "Fin", new Vector2(-0.22f, 0f), new Vector2(0.04f, 0.22f), Color.gray, 11);
+                    break;
+
+                default:
+                    if (rootSr != null)
+                    {
+                        rootSr.enabled = true;
+                        rootSr.color = c;
+                    }
+                    break;
+            }
         }
 
         private void CheckBattleEnd()
@@ -1671,74 +2076,118 @@ namespace TrajectoryTitans
             }
 
             // 2. BOTTOM PANEL HUD (Optimized responsive layout)
-            float botH = sh * 0.32f;
+            float botH = sh * 0.22f; // Compact: 22% of screen height
             float leftW = sw * 0.33f;
-            float rightW = sw * 0.24f;
+            float rightW = sw * 0.25f;
             float midW = sw - leftW - rightW - 24f - safeL - safeR;
 
             // Bottom Left: Joystick and Fuel Points Meter
             Rect rLeft = new Rect(12 + safeL, sh - botH - 8, leftW, botH);
-            Box(rLeft, new Color(0.04f, 0.05f, 0.1f, 0.95f));
+            Box(rLeft, new Color(0.04f, 0.05f, 0.1f, 0.5f)); // Transparent
 
-            // Draw Virtual Joystick (Phase 2 & 3)
-            float joyX = rLeft.x + 85f;
+            // Draw Virtual Joystick
+            float joyX = rLeft.x + 65f;
             float joyY = rLeft.y + rLeft.height * 0.5f;
-            GUI.color = new Color(0.12f, 0.18f, 0.32f, 0.85f);
-            GUI.DrawTexture(new Rect(joyX - joystickRadius, joyY - joystickRadius, joystickRadius * 2, joystickRadius * 2), white);
+            GUI.color = new Color(0.12f, 0.18f, 0.32f, 0.6f);
+            GUI.DrawTexture(new Rect(joyX - joystickRadius * 0.8f, joyY - joystickRadius * 0.8f, joystickRadius * 1.6f, joystickRadius * 1.6f), white);
             GUI.color = Color.white;
 
             float thumbX = joyX + (isJoystickDragging ? (joystickCurrent.x - joystickStart.x) : 0f);
-            thumbX = Mathf.Clamp(thumbX, joyX - joystickRadius, joyX + joystickRadius);
+            thumbX = Mathf.Clamp(thumbX, joyX - joystickRadius * 0.8f, joyX + joystickRadius * 0.8f);
             GUI.color = Color.cyan;
-            GUI.DrawTexture(new Rect(thumbX - 22f, joyY - 22f, 44f, 44f), white);
+            GUI.DrawTexture(new Rect(thumbX - 16f, joyY - 16f, 32f, 32f), white);
             GUI.color = Color.white;
 
             // Fuel points layout
             float fuelPct = player.fuel / tanks[(int)player.archetype].fuel;
-            GUI.Label(new Rect(rLeft.x + 165f, rLeft.y + 15f, leftW - 175f, 26), "FUEL METER", smallStyle);
-            DrawProgress(new Rect(rLeft.x + 165f, rLeft.y + 44f, leftW - 180f, 16), fuelPct, new Color(0.92f, 0.72f, 0.18f));
-            GUI.Label(new Rect(rLeft.x + 165f, rLeft.y + 65f, leftW - 175f, 40), "HOLD TO ROLL\nTREADS", smallStyle);
+            GUI.Label(new Rect(rLeft.x + 135f, rLeft.y + 10f, leftW - 145f, 22), "FUEL METER", smallStyle);
+            DrawProgress(new Rect(rLeft.x + 135f, rLeft.y + 34f, leftW - 145f, 12), fuelPct, new Color(0.92f, 0.72f, 0.18f));
+            GUI.Label(new Rect(rLeft.x + 135f, rLeft.y + 50f, leftW - 145f, 36), "HOLD TO MOVE", smallStyle);
 
-            // Bottom Center: Horizontally scrollable Weapon selector (Phase 2)
+            // Bottom Center: Collapsible Weapon Selector Capsule / Scroll Drawer
             Rect rMid = new Rect(rLeft.xMax + 6, sh - botH - 8, midW, botH);
-            Box(rMid, new Color(0.04f, 0.05f, 0.1f, 0.95f));
-            GUI.Label(new Rect(rMid.x + 12, rMid.y + 10, 150, 24), "SELECT ARMORY", smallStyle);
+            Box(rMid, new Color(0.04f, 0.05f, 0.1f, 0.65f));
 
-            scroll = GUI.BeginScrollView(new Rect(rMid.x + 8, rMid.y + 35, rMid.width - 16, rMid.height - 45), scroll, new Rect(0, 0, weapons.Length * 125, rMid.height - 70));
-            for (int i = 0; i < weapons.Length; i++)
+            if (!isWeaponDrawerOpen)
             {
-                Rect itemRect = new Rect(i * 120 + 4, 4, 112, rMid.height - 82);
-                bool isSelected = selectedWeaponIndex == i;
-                Box(itemRect, isSelected ? new Color(0.48f, 0.22f, 0.05f, 0.98f) : new Color(0.08f, 0.12f, 0.22f, 0.92f));
+                // Collapsed: Selected Weapon Capsule
+                var currentW = weapons[selectedWeaponIndex];
 
-                GUI.color = weapons[i].color;
-                GUI.DrawTexture(new Rect(itemRect.x + 8, itemRect.y + 8, itemRect.width - 16, 6), white);
+                // Quick Switch Left
+                if (GUI.Button(new Rect(rMid.x + 6, rMid.y + (rMid.height - 36) * 0.5f, 32, 36), "<", buttonStyle))
+                {
+                    selectedWeaponIndex = (selectedWeaponIndex - 1 + weapons.Length) % weapons.Length;
+                }
+
+                // Center Information Button (Click to Expand Drawer)
+                Rect capsuleBtn = new Rect(rMid.x + 44, rMid.y + 6, rMid.width - 88, rMid.height - 12);
+                GUI.color = new Color(0.08f, 0.14f, 0.28f, 0.8f);
+                GUI.DrawTexture(capsuleBtn, white);
                 GUI.color = Color.white;
 
-                GUI.Label(new Rect(itemRect.x + 4, itemRect.y + 18, itemRect.width - 8, 38), weapons[i].name, smallStyle);
-                GUI.Label(new Rect(itemRect.x + 4, itemRect.y + 58, itemRect.width - 8, 24), "AMMO: " + player.ammoInBattle[i], smallStyle);
+                // Color swatch
+                GUI.color = currentW.color;
+                GUI.DrawTexture(new Rect(capsuleBtn.x + 12, capsuleBtn.y + (capsuleBtn.height - 12) * 0.5f, 12, 12), white);
+                GUI.color = Color.white;
 
-                if (GUI.Button(itemRect, "", isSelected ? selectedStyle : cardStyle))
+                string capsuleText = currentW.name.ToUpper() + " (" + player.ammoInBattle[selectedWeaponIndex] + ")  [+] SELECT";
+                if (GUI.Button(capsuleBtn, capsuleText, smallStyle))
                 {
-                    selectedWeaponIndex = i;
+                    isWeaponDrawerOpen = true;
+                }
+
+                // Quick Switch Right
+                if (GUI.Button(new Rect(rMid.xMax - 38, rMid.y + (rMid.height - 36) * 0.5f, 32, 36), ">", buttonStyle))
+                {
+                    selectedWeaponIndex = (selectedWeaponIndex + 1) % weapons.Length;
                 }
             }
-            GUI.EndScrollView();
+            else
+            {
+                // Expanded horizontal scrollable drawer
+                GUI.Label(new Rect(rMid.x + 10, rMid.y + 6, 120, 22), "SELECT WEAPON", smallStyle);
+                if (GUI.Button(new Rect(rMid.xMax - 75, rMid.y + 4, 70, 22), "[x] CLOSE", smallStyle))
+                {
+                    isWeaponDrawerOpen = false;
+                }
+
+                scroll = GUI.BeginScrollView(new Rect(rMid.x + 6, rMid.y + 28, rMid.width - 12, rMid.height - 34), scroll, new Rect(0, 0, weapons.Length * 115, rMid.height - 45));
+                for (int i = 0; i < weapons.Length; i++)
+                {
+                    Rect itemRect = new Rect(i * 110 + 4, 4, 102, rMid.height - 42);
+                    bool isSelected = selectedWeaponIndex == i;
+                    Box(itemRect, isSelected ? new Color(0.48f, 0.22f, 0.05f, 0.85f) : new Color(0.08f, 0.12f, 0.22f, 0.75f));
+
+                    GUI.color = weapons[i].color;
+                    GUI.DrawTexture(new Rect(itemRect.x + 6, itemRect.y + 6, itemRect.width - 12, 5), white);
+                    GUI.color = Color.white;
+
+                    GUI.Label(new Rect(itemRect.x + 4, itemRect.y + 14, itemRect.width - 8, 22), weapons[i].name, smallStyle);
+                    GUI.Label(new Rect(itemRect.x + 4, itemRect.y + 38, itemRect.width - 8, 18), "AMMO: " + player.ammoInBattle[i], smallStyle);
+
+                    if (GUI.Button(itemRect, "", GUIStyle.none))
+                    {
+                        selectedWeaponIndex = i;
+                        isWeaponDrawerOpen = false;
+                    }
+                }
+                GUI.EndScrollView();
+            }
 
             // Bottom Right: Touch Drag-to-Aim indicators & FIRE
             Rect rRight = new Rect(rMid.xMax + 6, sh - botH - 8, rightW, botH);
-            Box(rRight, new Color(0.04f, 0.05f, 0.1f, 0.95f));
+            Box(rRight, new Color(0.04f, 0.05f, 0.1f, 0.5f)); // Transparent
 
-            GUI.Label(new Rect(rRight.x + 12, rRight.y + 12, rRight.width - 24, 26), "ANGLE: " + Mathf.RoundToInt(aimAngle) + "°   PWR: " + Mathf.RoundToInt(shotPower), smallStyle);
+            GUI.Label(new Rect(rRight.x + 10, rRight.y + 8, rRight.width - 20, 22), "ANG: " + Mathf.RoundToInt(aimAngle) + "°  PWR: " + Mathf.RoundToInt(shotPower), smallStyle);
 
-            // Circular fire button (Phase 2)
-            float fireRadius = 36f;
+            // Circular fire button
+            float fireRadius = 26f;
             float fireX = rRight.x + rRight.width * 0.5f;
             float fireY = rRight.y + rRight.height * 0.62f;
-            GUI.color = new Color(0.85f, 0.15f, 0.15f);
+            GUI.color = new Color(0.85f, 0.15f, 0.15f, 0.9f);
             if (GUI.Button(new Rect(fireX - fireRadius, fireY - fireRadius, fireRadius * 2, fireRadius * 2), "FIRE", buttonStyle))
             {
-                PlayerShoot();
+                if (!isWeaponDrawerOpen) PlayerShoot();
             }
             GUI.color = Color.white;
 
@@ -1839,6 +2288,7 @@ namespace TrajectoryTitans
 
         private void ClearWorld()
         {
+            ClearParticlePool();
             foreach (var o in worldObjects) if (o != null) Destroy(o);
             worldObjects.Clear();
             projectiles.Clear();
@@ -1849,6 +2299,8 @@ namespace TrajectoryTitans
             activeParticles.Clear();
             player = null;
             enemy = null;
+            terrainMeshGo = null;
+            terrainMesh = null;
         }
 
         private GameObject CreateRectGameObject(string name, Vector2 pos, Vector2 size, Color color, int order)
@@ -1995,7 +2447,15 @@ namespace TrajectoryTitans
             save = string.IsNullOrEmpty(json) ? new SaveData() : JsonUtility.FromJson<SaveData>(json);
             if (save == null) save = new SaveData();
             if (save.tankLevels == null || save.tankLevels.Length != 5) save.tankLevels = new int[5] { 1, 1, 1, 1, 1 };
-            if (save.weaponLevels == null || save.weaponLevels.Length != 10) save.weaponLevels = new int[10] { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+            if (save.weaponLevels == null || save.weaponLevels.Length != 15)
+            {
+                var newLevels = new int[15];
+                for (int i = 0; i < 15; i++)
+                {
+                    newLevels[i] = (save.weaponLevels != null && i < save.weaponLevels.Length) ? save.weaponLevels[i] : 1;
+                }
+                save.weaponLevels = newLevels;
+            }
         }
 
         private void Save()
